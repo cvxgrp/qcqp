@@ -5,7 +5,7 @@ import qcqp
 import numpy as np
 
 n = 50
-m = 200
+m = int(0.1*n*n)
 s = 290797
 W = np.zeros((n, n))
 for k in range(m):
