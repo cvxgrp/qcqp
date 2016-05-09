@@ -35,6 +35,17 @@ print ('Upper bound: %.3f' % ub)
 
 Quadratic expressions
 ---------------------
+The quadraticity of an expression ``e`` can be tested using ``e.is_quadratic()``. Below is a list of expressions that CVXPY recognizes as a quadratic expression.
+* Any constant or affine expression
+* ``(quadratic) + (quadratic)`` or ``(quadratic) - (quadratic)``
+* ``(constant) * (quadratic)`` or ``(affine) * (affine)``
+* ``sum_squares(affine)``
+* ``power(affine, 2)``
+* ``square(affine)``
+* ``quad_over_lin(affine, constant)``
+* ``matrix_frac(affine, constant)``
+
+Currently, ``quad_form(affine, constant)`` is not supported. A workaround is to write the quadratic form as ``x.T*P*x``, which is recognized as ``(affine) * (affine)``.
 
 Constructing and solving problems
 ---------------------------------
