@@ -14,7 +14,7 @@ Installation via ``pip`` will soon be available.
 
 Example
 -------
-The following code uses SDP relaxation to get an upper bound on a random instance of the maximum cut problem.
+The following code uses semidefinite programming (SDP) relaxation to get an upper bound on a random instance of the maximum cut problem.
 ```
 n = 20
 numpy.random.seed(1)
@@ -49,3 +49,5 @@ Currently, ``quad_form(affine, constant)`` is not supported. A workaround is to 
 
 Constructing and solving problems
 ---------------------------------
+In order to use the SDP relaxation heuristic, the problem must have a quadratic objective function and quadratic constraints, using standard CVXPY syntax. Below is a list of available solve methods for QCQPs:
+* ``problem.solve(method="relax-SDP")`` solves the SDP relaxation of the problem.
