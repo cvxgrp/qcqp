@@ -23,6 +23,7 @@ import cvxpy as cvx
 import numpy as np
 import canonInterface
 import cvxpy.lin_ops.lin_utils as lu
+from numpy import linalg as LA
 
 # Take an arbitrary indefinite quadratic expression and return an array
 # of matrices, where each entry is a sparse matrix containing the
@@ -58,6 +59,16 @@ def lift(expr, id_to_col, N):
     if isinstance(expr, cvx.affine_prod):
         Xs = lift(expr.args[0], id_to_col, N)
         Ys = lift(expr.args[1], id_to_col, N)
+        ret = []
+        m = expr.args[0].size[0]
+        n = expr.args[1].size[1]
+        p = expr.args[0].size[1]
+        for j in range(n):
+            for i in range(m):
+                M = sp.csc_matrix((N+1, N+1))
+                for k in range(expr.args[0].size[1]):
+                    M += None
+                    # M+= X[i][k] Y[k][j]
         pass
     elif isinstance(expr, cvx.quad_over_lin):
         Xs = lift(expr.args[0], id_to_col, N)
@@ -66,10 +77,15 @@ def lift(expr, id_to_col, N):
     elif isinstance(expr, cvx.power):
         Xs = lift(expr.args[0], id_to_col, N)
         p = expr.args[1].value
-        pass
+        if p == 1:
+            return Xs
+        elif p == 2:
+            return [X*X.T for X in Xs]
+        else:
+            raise Exception("Error while processing power(x, %d)." % int(p))
     elif isinstance(expr, cvx.matrix_frac):
         Xs = lift(expr.args[0], id_to_col, N)
-        P = expr.args[1].value
+        Pinv = LA.inv(expr.args[1].value)
         pass
     elif isinstance(expr, cvx.affine.affine_atom.AffAtom):
         Xs = [X for arg in expr.args for X in lift(arg, id_to_col, N)]
