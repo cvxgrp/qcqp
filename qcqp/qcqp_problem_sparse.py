@@ -23,6 +23,7 @@ import cvxpy as cvx
 import numpy as np
 import scipy.sparse as sp
 import time
+import canonInterface
 
 # Take a scalar-valued indefinite quadratic expression and lift it to the form of
 #   Tr(MX),

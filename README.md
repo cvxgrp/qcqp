@@ -37,11 +37,11 @@ Quadratic expressions
 ---------------------
 The quadraticity of an expression ``e`` can be tested using ``e.is_quadratic()``. Below is a list of expressions that CVXPY recognizes as a quadratic expression.
 * Any constant or affine expression
-* ``(quadratic) + (quadratic)`` or ``(quadratic) - (quadratic)``
-* ``(constant) * (quadratic)`` or ``(affine) * (affine)``
-* ``sum_squares(affine)``
+* Any affine transformation applied to a quadratic expression, e.g., ``(quadratic) + (quadratic)`` or ``(constant) * (quadratic)``
+* ``(affine) * (affine)``
 * ``power(affine, 2)``
 * ``square(affine)``
+* ``sum_squares(affine)``
 * ``quad_over_lin(affine, constant)``
 * ``matrix_frac(affine, constant)``
 
