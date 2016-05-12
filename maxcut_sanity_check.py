@@ -1,5 +1,10 @@
-import sys
-sys.path.append('/home/jaehyun/qcqp/qcqp')
+#!/usr/bin/python
+
+# n=200: 2.2943e3 / 1.8108e3 (2.38 sec)
+# n=100: 618.5762 / 453.0000 (0.67 sec)
+# n=50: 166.4675 / 112.5000
+# n=20: 27.8382 / 16.2500
+
 import cvxpy as cvx
 import qcqp
 import numpy as np

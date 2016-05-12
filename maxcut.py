@@ -11,6 +11,7 @@ W = np.random.binomial(1, 0.2, size=(n, n))
 W = np.asmatrix(W)
 
 x = cvx.Variable(n)
+v = np.asmatrix(np.random.randn(1, n))
 obj = 0.25*(cvx.sum_entries(W) - x.T*W*x)
 cons = [cvx.square(x) == 1]
 prob = cvx.Problem(cvx.Maximize(obj), cons)
