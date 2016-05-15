@@ -12,7 +12,7 @@ W = np.asmatrix(W)
 
 x = cvx.Variable(n)
 v = np.asmatrix(np.random.randn(1, n))
-obj = 0.25*(cvx.sum_entries(W) - x.T*W*x)
+obj = 0.25*(cvx.sum_entries(W) - cvx.quad_form(x, W))
 cons = [cvx.square(x) == 1]
 prob = cvx.Problem(cvx.Maximize(obj), cons)
 

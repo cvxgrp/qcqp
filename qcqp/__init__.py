@@ -18,16 +18,3 @@ along with CVXPY.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 from . import qcqp_problem
-from .quad_form import quad_form
-#from .annulus import Annulus
-#from .assign import Assign
-#from .boolean import Boolean
-#from .card import Card
-#from .choose import Choose
-#from .integer import Integer
-#from .orthog import Orthog
-#from .partition import Partition
-#from .rank import Rank
-#from .sphere import Sphere
-#from .soc_boundary import SOCBound
-#from .tour import Tour

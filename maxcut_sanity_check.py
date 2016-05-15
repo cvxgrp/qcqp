@@ -22,7 +22,7 @@ for k in range(m):
 
 # Find upper bound using SDP relaxation
 x = cvx.Variable(n)
-obj = 0.25*(cvx.sum_entries(W) - qcqp.quad_form(x, W))
+obj = 0.25*(cvx.sum_entries(W) - cvx.quad_form(x, W))
 cons = [cvx.square(x) == 1]
 prob = cvx.Problem(cvx.Maximize(obj), cons)
 

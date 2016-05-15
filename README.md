@@ -25,7 +25,7 @@ W = numpy.asmatrix(W)
 
 # Solve using SDP relaxation
 x = cvx.Variable(n)
-obj = 0.25*(cvx.sum_entries(W) - x.T*W*x)
+obj = 0.25*(cvx.sum_entries(W) - cvx.quad_form(x, W))
 cons = [cvx.square(x) == 1]
 prob = cvx.Problem(cvx.Maximize(obj), cons)
 
@@ -44,8 +44,7 @@ The quadraticity of an expression ``e`` can be tested using ``e.is_quadratic()``
 * ``sum_squares(affine)``
 * ``quad_over_lin(affine, constant)``
 * ``matrix_frac(affine, constant)``
-
-Currently, ``quad_form(affine, constant)`` is not supported. A workaround is to write the quadratic form as ``x.T*P*x``, which is recognized as ``(affine) * (affine)``.
+* ``quad_form(affine, constant)``
 
 Constructing and solving problems
 ---------------------------------
