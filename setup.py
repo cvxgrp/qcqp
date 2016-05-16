@@ -9,7 +9,6 @@ setup(
     license='GPLv3',
     zip_safe=False,
     install_requires=["cvxpy >= 0.3.5",
-                      "munkres",
                       "CVXcanon >= 0.0.22"],
     use_2to3=True,
     url='http://github.com/cvxgrp/qcqp/',

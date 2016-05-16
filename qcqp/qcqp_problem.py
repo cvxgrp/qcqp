@@ -146,29 +146,24 @@ def get_id_map(vars):
         N += x.size[0]*x.size[1]
     return id_map, N
 
-def relax_sdp(self, *args, **kwargs):
+def solve_SDP_relaxation(prob, *args, **kwargs):
     """Solve the SDP relaxation.
     """
     # check quadraticity
-    if not self.objective.args[0].is_quadratic():
+    if not prob.objective.args[0].is_quadratic():
         raise Exception("Objective is not quadratic.")
-    if not all([constr._expr.is_quadratic() for constr in self.constraints]):
+    if not all([constr._expr.is_quadratic() for constr in prob.constraints]):
         raise Exception("Not all constraints are quadratic.")
-
-    if self.is_dcp():
-        # TODO: redirect this to normal solve method?
-        warnings.warn("Problem is convex; solving it without the relax-SDP option is recommended.")
-
+    if prob.is_dcp():
+        warnings.warn("Problem is already convex; relaxation is not necessary.")
     warnings.warn("Solving SDP relaxation of nonconvex QCQP.")
-
-    id_map, N = get_id_map(self.variables())
-
+    id_map, N = get_id_map(prob.variables())
     # lifted variables and semidefinite constraint
     X = cvx.Semidef(N + 1)
-    M = quad_coeffs(self.objective.args[0], id_map, N)[0]
-    rel_obj = type(self.objective)(cvx.sum_entries(cvx.mul_elemwise(M, X)))
+    M = quad_coeffs(prob.objective.args[0], id_map, N)[0]
+    rel_obj = type(prob.objective)(cvx.sum_entries(cvx.mul_elemwise(M, X)))
     rel_constr = [X[N, N] == 1]
-    for constr in self.constraints:
+    for constr in prob.constraints:
         Ms = quad_coeffs(constr._expr, id_map, N)
         for M in Ms:
             c = cvx.sum_entries(cvx.mul_elemwise(M, X))
@@ -181,16 +176,40 @@ def relax_sdp(self, *args, **kwargs):
     rel_prob.solve(*args, **kwargs)
     
     if rel_prob.status not in [cvx.OPTIMAL, cvx.OPTIMAL_INACCURATE]:
-        print (rel_prob.status)
-        return rel_prob.value
+        print ("Relaxation problem status: " + rel_prob.status)
+        return None, rel_prob.value, id_map, N
 
+    if prob.objective.NAME == "minimize":
+        print ("Lower bound: " + str(rel_prob.value))
+    else:
+        print ("Upper bound: " + str(rel_prob.value))
+
+    return X.value, rel_prob.value, id_map, N
+
+def relax_sdp(self, *args, **kwargs):
+    X, sdp_bound, id_map, N = solve_SDP_relaxation(self, *args, **kwargs)
+    
     ind = 0
     for x in self.variables():
         size = x.size[0]*x.size[1]
-        x.value = np.reshape(X.value[ind:ind+size, -1], x.size, order='F')
+        x.value = np.reshape(X[ind:ind+size, -1], x.size, order='F')
         ind += size
 
-    return rel_prob.value
+    return sdp_bound
+
+def relax_sdp_rand(self, *args, **kwargs):
+    X, sdp_bound, id_map, N = solve_SDP_relaxation(self, *args, **kwargs)
+
+    # TODO: generate random samples using X
+    
+    ind = 0
+    for x in self.variables():
+        size = x.size[0]*x.size[1]
+        x.value = np.reshape(X[ind:ind+size, -1], x.size, order='F')
+        ind += size
+
+    return sdp_bound
 
 # Add SDP relaxation method to cvx Problem.
 cvx.Problem.register_solve("relax-SDP", relax_sdp)
+cvx.Problem.register_solve("relax-SDP-rand", relax_sdp_rand)
