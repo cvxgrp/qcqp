@@ -9,8 +9,8 @@ Installation
 ------------
 You should first install CVXPY, following the instructions [here](http://www.cvxpy.org/). If you already have CVXPY, make sure you have the latest version by running ``pip install --upgrade cvxpy``.
 
-To install QCQP, download the source, and run ``python setup.py install`` in the source directory.
-Installation via ``pip`` will soon be available. 
+The simplest and recommended way of installing QCQP is to run ``pip install qcqp``.
+To install the package from source, run ``python setup.py install`` in the source directory.
 
 Example
 -------
