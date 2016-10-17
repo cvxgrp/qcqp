@@ -53,14 +53,14 @@ def solve_SDP_relaxation(prob, *args, **kwargs):
     X = cvx.Semidef(N + 1)
     
     (Ps, Q, R) = extractor.get_coeffs(prob.objective.args[0])
-    M = sp.bmat([[Ps[0], Q.T], [Q, R]])
+    M = sp.bmat([[Ps[0], Q.T/2], [Q/2, R]])
     rel_obj = type(prob.objective)(cvx.sum_entries(cvx.mul_elemwise(M, X)))
     rel_constr = [X[N, N] == 1]
     for constr in prob.constraints:
         sz = constr._expr.size[0]*constr._expr.size[1]
         (Ps, Q, R) = extractor.get_coeffs(constr._expr)
         for i in range(sz):
-            M = sp.bmat([[Ps[i], Q[i, :].T], [Q[i, :], R[i]]])
+            M = sp.bmat([[Ps[i], Q[i, :].T/2], [Q[i, :]/2, R[i]]])
             c = cvx.sum_entries(cvx.mul_elemwise(M, X))
             if constr.OP_NAME == '==':
                 rel_constr.append(c == 0)
@@ -73,11 +73,6 @@ def solve_SDP_relaxation(prob, *args, **kwargs):
     if rel_prob.status not in [cvx.OPTIMAL, cvx.OPTIMAL_INACCURATE]:
         print ("Relaxation problem status: " + rel_prob.status)
         return None, rel_prob.value, id_map, N
-
-    if prob.objective.NAME == "minimize":
-        print ("Lower bound: " + str(rel_prob.value))
-    else:
-        print ("Upper bound: " + str(rel_prob.value))
 
     return X.value, rel_prob.value, id_map, N
 
@@ -92,19 +87,25 @@ def relax_sdp(self, *args, **kwargs):
 
     return sdp_bound
 
-def relax_sdp_rand(self, *args, **kwargs):
+def noncvx_admm(self, *args, **kwargs):
     X, sdp_bound, id_map, N = solve_SDP_relaxation(self, *args, **kwargs)
 
-    # TODO: generate random samples using X
-    
-    ind = 0
-    for x in self.variables():
-        size = x.size[0]*x.size[1]
-        x.value = np.reshape(X[ind:ind+size, -1], x.size, order='F')
-        ind += size
+    num_samples = 100
+    num_iters = 100
+    eps = 0.001
 
-    return sdp_bound
+    # TODO
+    # (1) generate random samples using X
+    # (2) run ADMM on each sample
 
-# Add SDP relaxation method to cvx Problem.
+    return NotImplemented
+
+def qcqp_dccp(self, *args, **kwargs):
+    # TODO: don't solve SDP relaxation, split the given problem
+    # into convex/concave parts
+    return NotImplemented
+
+# Add solution methods to Problem class.
 cvx.Problem.register_solve("relax-SDP", relax_sdp)
-cvx.Problem.register_solve("relax-SDP-rand", relax_sdp_rand)
+cvx.Problem.register_solve("noncvx-admm", noncvx_admm)
+cvx.Problem.register_solve("qcqp-dccp", qcqp_dccp)
