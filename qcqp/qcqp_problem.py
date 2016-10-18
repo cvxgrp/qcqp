@@ -35,18 +35,18 @@ def get_id_map(vars):
         N += x.size[0]*x.size[1]
     return id_map, N
 
-def solve_SDP_relaxation(prob, *args, **kwargs):
-    """Solve the SDP relaxation.
-    """
+def check_quadraticity(prob):
     # check quadraticity
     if not prob.objective.args[0].is_quadratic():
         raise Exception("Objective is not quadratic.")
     if not all([constr._expr.is_quadratic() for constr in prob.constraints]):
         raise Exception("Not all constraints are quadratic.")
     if prob.is_dcp():
-        warnings.warn("Problem is already convex; relaxation is not necessary.")
-    warnings.warn("Solving SDP relaxation of nonconvex QCQP.")
+        warnings.warn("Problem is already convex; specifying solve method is unnecessary.")
 
+def solve_SDP_relaxation(prob, *args, **kwargs):
+    """Solve the SDP relaxation.
+    """
     id_map, N = get_id_map(prob.variables())
     extractor = QuadCoeffExtractor(id_map, N)
 
@@ -80,12 +80,12 @@ def solve_SDP_relaxation(prob, *args, **kwargs):
 # Solves a nonconvex problem
 # minimize ||x-z||_2^2
 # subject to x^T A x + b^T x + c <= 0 or = 0
-def one_qcqp(z, A, b, c, equality_cons = False):
-    # if z is feasible, it's the solution
+def one_qcqp(z, A, b, c, equality_cons=False, tol=1e-6):
+    # if constraint is ineq and z is feasible: z is the solution
     if not equality_cons and z.T*A*z + z.T*b + c <= 0:
         return z
 
-    lmb, Q = map(np.asmatrix, LA.eig(A.todense()))
+    lmb, Q = map(np.asmatrix, LA.eigh(A.todense()))
     zhat = Q.T*z
     bhat = Q.T*b
 
@@ -109,8 +109,7 @@ def one_qcqp(z, A, b, c, equality_cons = False):
     if e == np.inf:
         e = 1.
         while phi(e) >= 0: e *= 2.
-    eps = 1e-6
-    while e-s > eps:
+    while e-s > tol:
         m = (s+e)/2.
         p = phi(m)
         if p > 0: s = m
@@ -123,32 +122,31 @@ def one_qcqp(z, A, b, c, equality_cons = False):
     x = Q*xhat
     return x
 
+def assign_vars(xs, vals):
+    ind = 0
+    for x in xs:
+        size = x.size[0]*x.size[1]
+        x.value = np.reshape(vals[ind:ind+size], x.size, order='F')
+        ind += size
+
 def relax_sdp(self, *args, **kwargs):
+    check_quadraticity(self)
     X, sdp_bound, id_map, N = solve_SDP_relaxation(self, *args, **kwargs)
 
-    ind = 0
-    for x in self.variables():
-        size = x.size[0]*x.size[1]
-        x.value = np.reshape(X[ind:ind+size, -1], x.size, order='F')
-        ind += size
+    assign_vars(self.variables(), X[:, -1])
 
     return sdp_bound
 
-def noncvx_admm(self, *args, **kwargs):
-    # check quadraticity
-    if not self.objective.args[0].is_quadratic():
-        raise Exception("Objective is not quadratic.")
-    if not all([constr._expr.is_quadratic() for constr in self.constraints]):
-        raise Exception("Not all constraints are quadratic.")
-    if self.is_dcp():
-        warnings.warn("Problem is already convex; relaxation is not necessary.")
+def noncvx_admm(self, num_samples=100, num_iters=1000, viollim=1e10,
+    eps=1e-3, *args, **kwargs):
+    check_quadraticity(self)
 
     id_map, N = get_id_map(self.variables())
     extractor = QuadCoeffExtractor(id_map, N)
 
-    (P0s, Q0, R0) = extractor.get_coeffs(self.objective.args[0])
+    (P0, Q0, R0) = extractor.get_coeffs(self.objective.args[0])
     Q0 = Q0.T
-    P0 = P0s[0]
+    P0 = P0[0]
 
     if self.objective.NAME == "maximize":
         P0 = -P0
@@ -170,16 +168,12 @@ def noncvx_admm(self, *args, **kwargs):
 
     M = len(PP)
 
-    lmb0, P0Q = map(np.asmatrix, LA.eig(P0.todense()))
+    lmb0, P0Q = map(np.asmatrix, LA.eigh(P0.todense()))
     lmb_min = np.min(lmb0)
     if lmb_min < 0: rho = 2*(1-lmb_min)/M
     else: rho = 1./M
     rho *= 5
 
-    num_samples = 100
-    num_iters = 100
-    viollim = 1e10
-    eps = 0.001
     bestx = None
     bestf = np.inf
 
@@ -206,8 +200,8 @@ def noncvx_admm(self, *args, **kwargs):
                 ys[:, i] += rho*(z - xs[:, i])
 
             za = (np.sum(xs, 1)+z)/(M+1)
-            if lstza is not None and LA.norm(lstza-za) < eps:
-                break
+            #if lstza is not None and LA.norm(lstza-za) < eps:
+            #    break
             lstza = za
             maxviol = 0
             for i in range(M):
@@ -217,7 +211,7 @@ def noncvx_admm(self, *args, **kwargs):
                 else: viol = max(0, viol)
                 maxviol = max(maxviol, viol)
 
-            # print(t, maxviol)
+            #print(t, maxviol)
 
             objt = (za.T*P0*za + za.T*Q0 + R0)[0, 0]
             if maxviol > viollim:
@@ -235,18 +229,77 @@ def noncvx_admm(self, *args, **kwargs):
     print("best found point has objective: %.5f" % (bestf))
     print("best found point: ", bestx)
 
-    ind = 0
-    for x in self.variables():
-        size = x.size[0]*x.size[1]
-        x.value = np.reshape(bestx[ind:ind+size, -1], x.size, order='F')
-        ind += size
-
+    assign_vars(self.variables(), bestx)
     return bestf
 
+# given indefinite P
+def split_quadratic(P):
+    n = P.shape[0]
+    # zero matrix
+    if P.nnz == 0:
+        return (sp.csr_matrix((n, n)), sp.csr_matrix((n, n)))
+    lmb_min = np.min(LA.eigh(P.todense())[0])
+    if lmb_min < 0:
+        return (P + (1-lmb_min)*sp.identity(n), (1-lmb_min)*sp.identity(n))
+    return (P, sp.csr_matrix((n, n)))
+
+
 def qcqp_dccp(self, *args, **kwargs):
-    # TODO: don't solve SDP relaxation, split the given problem
-    # into convex/concave parts
-    return NotImplemented
+    check_quadraticity(self)
+    try:
+        import dccp
+    except ImportError:
+        print("DCCP package is not installed; qcqp-dccp method is unavailable.")
+        raise
+
+    id_map, N = get_id_map(self.variables())
+    extractor = QuadCoeffExtractor(id_map, N)
+
+    (P0, Q0, R0) = extractor.get_coeffs(self.objective.args[0])
+    Q0 = Q0.T
+    P0 = P0[0]
+
+    if self.objective.NAME == "maximize":
+        P0 = -P0
+        Q0 = -Q0
+        R0 = -R0
+
+    PP = []
+    QQ = []
+    RR = []
+    rel = []
+    for constr in self.constraints:
+        sz = constr._expr.size[0]*constr._expr.size[1]
+        (Ps, Q, R) = extractor.get_coeffs(constr._expr)
+        for i in range(sz):
+            PP.append(Ps[i])
+            QQ.append(Q[i, :].T)
+            RR.append(R[i])
+            rel.append(constr.OP_NAME == '==')
+
+    M = len(PP)
+
+    X = cvx.Variable(N)
+    T = cvx.Variable() # objective function
+
+    obj = cvx.Minimize(T)
+    (P0p, P0m) = split_quadratic(P0)
+    cons = [cvx.quad_form(X, P0p)+X.T*Q0+R0 <= cvx.quad_form(X, P0m)+T]
+
+    for i in range(M):
+        (Pp, Pm) = split_quadratic(PP[i])
+        cons.append(cvx.quad_form(X, Pp)+X.T*QQ[i]+RR[i] <= cvx.quad_form(X, Pm))
+
+    prob = cvx.Problem(obj, cons)
+    #assert prob.is_dccp(), "Unknown error: Failed to form a DCCP problem."
+
+    # TODO: solve SDP relaxation, generate multiple sample points
+
+    result = prob.solve(method='dccp')[0]
+    if self.objective.NAME == "maximize":
+        result = -result
+    assign_vars(self.variables(), X.value)
+    return result
 
 # Add solution methods to Problem class.
 cvx.Problem.register_solve("relax-SDP", relax_sdp)
