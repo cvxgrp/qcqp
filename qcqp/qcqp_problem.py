@@ -288,7 +288,12 @@ def qcqp_dccp(self, *args, **kwargs):
 
     for i in range(M):
         (Pp, Pm) = split_quadratic(PP[i])
-        cons.append(cvx.quad_form(X, Pp)+X.T*QQ[i]+RR[i] <= cvx.quad_form(X, Pm))
+        lhs = cvx.quad_form(X, Pp)+X.T*QQ[i]+RR[i]
+        rhs = cvx.quad_form(X, Pm)
+        if rel[i]:
+            cons.append(lhs == rhs)
+        else:
+            cons.append(lhs <= rhs)
 
     prob = cvx.Problem(obj, cons)
     #assert prob.is_dccp(), "Unknown error: Failed to form a DCCP problem."
