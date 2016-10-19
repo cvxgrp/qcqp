@@ -23,14 +23,19 @@ numpy.random.seed(1)
 W = numpy.random.binomial(1, 0.2, size=(n, n))
 W = numpy.asmatrix(W)
 
-# Solve using SDP relaxation
+# Form a nonconvex problem.
 x = cvx.Variable(n)
 obj = 0.25*(cvx.sum_entries(W) - cvx.quad_form(x, W))
 cons = [cvx.square(x) == 1]
 prob = cvx.Problem(cvx.Maximize(obj), cons)
 
-ub = prob.solve(method='relax-SDP', solver=cvx.MOSEK)
+# Solve the SDP relaxation.
+ub = prob.solve(method='sdp-relax', solver=cvx.MOSEK)
 print ('Upper bound: %.3f' % ub)
+
+# Attempt to get a feasible solution.
+bestf = prob.solve(method='qcqp-admm')
+print (bestf, x.value)
 ```
 
 Quadratic expressions
