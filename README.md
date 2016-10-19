@@ -49,4 +49,6 @@ The quadraticity of an expression ``e`` can be tested using ``e.is_quadratic()``
 Constructing and solving problems
 ---------------------------------
 In order to use the SDP relaxation heuristic, the problem must have a quadratic objective function and quadratic constraints, using standard CVXPY syntax. Below is a list of available solve methods for QCQPs:
-* ``problem.solve(method="relax-SDP")`` solves the SDP relaxation of the problem.
+* ``problem.solve(method="sdp-relax")`` solves the SDP relaxation of the problem and returns the SDP lower bound (or an upper bound in the case of maximization problem).
+* ``problem.solve(method="qcqp-admm")`` attempts to find a feasible solution via consensus [alternating directions method of multipliers](http://stanford.edu/~boyd/admm.html) (ADMM).
+* ``problem.solve(method="qcqp-dccp")`` automatically splits indefinite quadratic functions to convex and concave parts, then invokes the [DCCP](https://github.com/cvxgrp/dccp) package to find a feasible solution.
