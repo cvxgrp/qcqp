@@ -26,6 +26,7 @@ import cvxpy.lin_ops.lin_utils as lu
 import scipy.sparse as sp
 import scipy.sparse.linalg as SLA
 from cvxpy.utilities import QuadCoeffExtractor
+from joblib import Parallel, delayed
 
 def get_id_map(vars):
     id_map = {}
@@ -163,10 +164,14 @@ def sdp_relax(self, *args, **kwargs):
     X, sdp_bound = solve_relaxation(N, P0, q0, r0, Ps, qs, rs, relops, *args, **kwargs)
     if self.objective.NAME == "maximize":
         sdp_bound = -sdp_bound
-
     assign_vars(self.variables(), X[:, -1])
-
     return sdp_bound
+
+def x_update(x, y, z, rho, P, q, r, relop):
+    return one_qcqp(z + (1/rho)*y, P, q, r, relop)
+
+def y_update(x, y, z, rho):
+    return y + rho*(z - x)
 
 def noncvx_admm(self, use_sdp=True,
     num_samples=100, num_iters=1000, viollim=1e10,
@@ -188,7 +193,6 @@ def noncvx_admm(self, use_sdp=True,
     if use_sdp:
         X, _ = solve_relaxation(N, P0, q0, r0, Ps, qs, rs, relops, *args, **kwargs)
         mu = np.asarray(X[:-1, -1]).flatten()
-        print(mu, mu.shape)
         Sigma = X[:-1, :-1] - mu*mu.T
         samples = np.random.multivariate_normal(mu, Sigma, num_samples)
     else:
@@ -198,21 +202,26 @@ def noncvx_admm(self, use_sdp=True,
     for sample in range(num_samples):
         x0 = np.asmatrix(samples[sample, :].reshape((N, 1)))
         z = x0
-        xs = np.repeat(x0, M, axis=1)
-        ys = np.asmatrix(np.zeros((N, M)))
+        xs = [x0 for i in range(M)]
+        ys = [np.zeros((N, 1)) for i in range(M)]
         print("trial %d: %f" % (sample, bestf))
 
         zlhs = 2*P0 + rho*M*sp.identity(N)
         lstza = None
         for t in range(num_iters):
-            rhs = np.sum(rho*xs-ys, 1) - q0
+            rhs = sum([rho*xs[i]-ys[i] for i in range(M)]) - q0
             z = np.asmatrix(SLA.spsolve(zlhs.tocsr(), rhs)).T
-            for i in range(M):
-                zz = z + (1/rho)*ys[:, i]
-                xs[:, i] = one_qcqp(zz, Ps[i], qs[i], rs[i], relops[i])
-                ys[:, i] += rho*(z - xs[:, i])
+            print(xs[0])
+            xs = Parallel(n_jobs=4)(
+                delayed(x_update)(xs[i], ys[i], z, rho, Ps[i], qs[i], rs[i], relops[i])
+                for i in range(M)
+            )
+            ys = Parallel(n_jobs=4)(
+                delayed(y_update)(xs[i], ys[i], z, rho)
+                for i in range(M)
+            )
 
-            za = (np.sum(xs, 1)+z)/(M+1)
+            za = (sum(xs)+z)/(M+1)
             #if lstza is not None and LA.norm(lstza-za) < tol:
             #    break
             lstza = za
