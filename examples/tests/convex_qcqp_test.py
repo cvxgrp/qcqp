@@ -19,6 +19,6 @@ print(prob.solve())
 print x.value
 
 # The optimal objective is returned by prob.solve().
-result = prob.solve(method='noncvx-admm', num_samples=5, num_iters=100)
+result = prob.solve(method='qcqp-admm', num_samples=5, num_iters=100)
 # The optimal value for x is stored in x.value.
 print x.value

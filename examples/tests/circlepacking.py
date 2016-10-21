@@ -18,9 +18,9 @@ for i in range(N):
 prob = cvx.Problem(obj, cons)
 # lb = prob.solve(method="sdp-relax",solver=cvx.MOSEK)
 # print(lb)
-print(prob.solve(method="qcqp-admm",num_samples=5,num_iters=20))
-#prob.solve(method="dccp") # not a dccp problem
-#print(prob.solve(method="qcqp-dccp",num_samples=10))
+#print(prob.solve(method="qcqp-admm",num_samples=5,num_iters=20))
+prob.solve(method="dccp") # not a dccp problem
+print(prob.solve(method="qcqp-dccp",num_samples=10))
 
 # plot the circles
 circ = np.linspace(0,2 * np.pi)

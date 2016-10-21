@@ -67,7 +67,7 @@ obj = cvx.sum_squares(x - z)
 cons = [cvx.quad_form(x, A) + b.T*x + c <= 0]
 prob = cvx.Problem(cvx.Minimize(obj), cons)
 
-lb = prob.solve(method='relax-SDP', solver=cvx.MOSEK)
+lb = prob.solve(method='sdp-relax', solver=cvx.MOSEK)
 print ('SDP lower bound: %.3f' % lb)
 
 x = one_qcqp(z, A, b, c)
