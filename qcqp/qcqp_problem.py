@@ -173,7 +173,7 @@ def x_update(x, y, z, rho, P, q, r, relop):
 def y_update(x, y, z, rho):
     return y + rho*(z - x)
 
-def noncvx_admm(self, use_sdp=True,
+def qcqp_admm(self, use_sdp=True,
     num_samples=100, num_iters=1000, viollim=1e10,
     tol=1e-3, *args, **kwargs):
     check_quadraticity(self)
@@ -211,7 +211,6 @@ def noncvx_admm(self, use_sdp=True,
         for t in range(num_iters):
             rhs = sum([rho*xs[i]-ys[i] for i in range(M)]) - q0
             z = np.asmatrix(SLA.spsolve(zlhs.tocsr(), rhs)).T
-            print(xs[0])
             xs = Parallel(n_jobs=4)(
                 delayed(x_update)(xs[i], ys[i], z, rho, Ps[i], qs[i], rs[i], relops[i])
                 for i in range(M)
@@ -331,5 +330,5 @@ def qcqp_dccp(self, use_sdp=True, use_eigen_split=False,
 
 # Add solution methods to Problem class.
 cvx.Problem.register_solve("sdp-relax", sdp_relax)
-cvx.Problem.register_solve("qcqp-admm", noncvx_admm)
+cvx.Problem.register_solve("qcqp-admm", qcqp_admm)
 cvx.Problem.register_solve("qcqp-dccp", qcqp_dccp)
