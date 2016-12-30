@@ -57,3 +57,4 @@ In order to use the SDP relaxation heuristic, the problem must have a quadratic 
 * ``problem.solve(method="sdp-relax")`` solves the SDP relaxation of the problem and returns the SDP lower bound (or an upper bound in the case of maximization problem).
 * ``problem.solve(method="qcqp-admm")`` attempts to find a feasible solution via consensus [alternating directions method of multipliers](http://stanford.edu/~boyd/admm.html) (ADMM).
 * ``problem.solve(method="qcqp-dccp")`` automatically splits indefinite quadratic functions to convex and concave parts, then invokes the [DCCP](https://github.com/cvxgrp/dccp) package to find a feasible solution.
+* ``problem.solve(method="coord-descent")`` performs a two-stage coordinate descent algorithm on random starting points. The first stage tries to find a feasible point, and the second stage tries to optimize the objective function over the set of feasible points.
