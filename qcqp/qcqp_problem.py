@@ -207,7 +207,7 @@ def qcqp_admm(self, use_sdp=True,
         z = x0
         xs = [x0 for i in range(M)]
         ys = [np.zeros((N, 1)) for i in range(M)]
-        print("trial %d: %f" % (sample, bestf))
+        #print("trial %d: %f" % (sample, bestf))
 
         zlhs = 2*P0 + rho*M*sp.identity(N)
         lstza = None
@@ -254,6 +254,7 @@ def qcqp_admm(self, use_sdp=True,
     print("best found point: ", bestx)
 
     assign_vars(self.variables(), bestx)
+    if self.objective.NAME == "maximize": bestf *= -1
     return bestf
 
 # given indefinite P
@@ -290,7 +291,8 @@ def qcqp_dccp(self, use_sdp=True, use_eigen_split=False,
     M = len(Ps)
 
     x = cvx.Variable(N)
-    T = cvx.Variable() # objective function
+    # dummy objective
+    T = cvx.Variable()
 
     obj = cvx.Minimize(T)
     P0p, P0m = split_quadratic(P0, use_eigen_split)
@@ -318,22 +320,23 @@ def qcqp_dccp(self, use_sdp=True, use_eigen_split=False,
             bestx = x.value
             print("found new point with f: %.5f" % (bestf))
 
-    if self.objective.NAME == "maximize":
-        bestf = -bestf
     assign_vars(self.variables(), x.value)
+    if self.objective.NAME == "maximize": bestf *= -1
     return bestf
 
 def get_violation(x, Ps, qs, rs, relops):
     M = len(Ps)
     ret = []
     for i in range(M):
-        v = x.T@Ps[i]@x + x.T@qs[i] + rs[i]
+        v = x.T*Ps[i]*x + x.T*qs[i] + rs[i]
         if relops[i] == '==':
             ret.append(abs(v))
         else:
             ret.append(max(0, v))
     return ret
 
+# given coefficients triples in the form of (p, q, r)
+# returns the list of violations of px^2 + qx + r <= 0 constraints
 def get_violation_onevar(x, coefs):
     ret = []
     for c in coefs:
@@ -351,12 +354,11 @@ def interval_intersection(C, I):
             ret.append(IJ)
     return ret
 
-# TODO: fix relops behaviors
 # coefs = [(p0, q0, r0), (p1, q1, r1), ..., (pm, qm, rm)]
 # returns the optimal point of the following program, or None if infeasible
 #   minimize p0 x^2 + q0 x + r0
 #   subject to pi x^2 + qi x + ri <= s
-# TODO: more efficient method for computing C
+# TODO: efficiently find feasible set using BST
 def onevar_qcqp(coefs, s, tol=1e-4):
     # feasible set as a collection of disjoint intervals
     C = [(-np.inf, np.inf)]
@@ -374,11 +376,9 @@ def onevar_qcqp(coefs, s, tol=1e-4):
             D = q**2 - 4*p*(r-s)
             if D >= 0:
                 rD = np.sqrt(D)
-                I = (-np.inf, (-q-rD)/(2*p))
-                C1 = interval_intersection(C, I)
-                I = ((-q+rD)/(2*p), np.inf)
-                C2 = interval_intersection(C, I)
-                C = C1 + C2
+                I1 = (-np.inf, (-q-rD)/(2*p))
+                I2 = ((-q+rD)/(2*p), np.inf)
+                C = interval_intersection(C, I1) + interval_intersection(C, I2)
         else:
             if q > tol:
                 I = (-np.inf, (s-r)/q)
@@ -411,13 +411,19 @@ def onevar_qcqp(coefs, s, tol=1e-4):
                 return x0
     return bestx
 
-# regard x^T P x + q^T x + r as a quadratic expression in xi
+# regard x^T P x + q^T x + r as a quadratic expression in xk
 # and returns the coefficients
-def get_onevar_coeffs(i, P, q, r):
-    t2 = P[i, i]
-    t1 = 2*(P[i, :].sum() - P[i, i]) + q[i, 0]
-    t0 = P[:i, :i].sum() + 2*P[:i, i+1:].sum() \
-         + P[i+1:, i+1:].sum() + r
+# TODO: speedup
+def get_onevar_coeffs(x, k, P, q, r):
+    x1, x2 = x[:k], x[k+1:]
+    P11, P12 = P[:k, :k], P[:k, k+1:]
+    P21, P22 = P[k+1:, :k], P[k+1:, k+1:]
+    q1, q2 = q[:k], q[k+1:]
+    Pk1, Pk2 = P[:k, k], P[k+1:, k]
+    t2 = P[k, k]
+    t1 = 2*(x1.T*Pk1 + x2.T*Pk2) + q[k, 0]
+    t0 = (x1.T*P11*x1 + x1.T*P12*x2 + x2.T*P21*x1 + x2.T*P22*x2) \
+         + (q1.T*x1 + q2.T*x2) + r
     return (t2, t1, t0)
 
 # rewrite the dirty stuff below
@@ -448,16 +454,18 @@ def coord_descent(self, use_sdp=True,
                 coefs = [(0, 0, 0)]
                 for j in range(M):
                     # quadratic, linear, constant terms
-                    c = get_onevar_coeffs(i, Ps[j], qs[j], rs[j])
+                    c = get_onevar_coeffs(x, i, Ps[j], qs[j], rs[j])
                     # constraint not relevant to xi is ignored
                     if abs(c[0]) > tol or abs(c[1]) > tol:
                         if relops[j] == '<=':
                             coefs.append(c)
                         else:
                             coefs.append(c)
-                            coefs.append((-c[0], -c[1], -c[2]))
+                            coefs.append((-c[0], -c[1], -c[2]-tol))
 
                 viol = max(get_violation_onevar(x[i], coefs))
+                #print('current violation in %d: %f' % (i, viol))
+                #print('x: ', x)
                 new_xi = x[i]
                 new_viol = viol
                 ss, es = 0, viol
@@ -484,23 +492,22 @@ def coord_descent(self, use_sdp=True,
 
         # phase 2: optimize objective over feasible points
         if failed: continue
-
         update_counter = 0
         converged = False
         for t in range(num_iters):
             # optimize over x[i]
             for i in range(N):
-                coefs = [get_onevar_coeffs(i, P0, q0, r0)]
+                coefs = [get_onevar_coeffs(x, i, P0, q0, r0)]
                 for j in range(M):
                     # quadratic, linear, constant terms
-                    c = get_onevar_coeffs(i, Ps[j], qs[j], rs[j])
+                    c = get_onevar_coeffs(x, i, Ps[j], qs[j], rs[j])
                     # constraint not relevant to xi is ignored
                     if abs(c[0]) > tol or abs(c[1]) > tol:
                         if relops[j] == '<=':
                             coefs.append(c)
                         else:
                             coefs.append(c)
-                            coefs.append((-c[0], -c[1], -c[2]))
+                            coefs.append((-c[0], -c[1], -c[2]-tol))
                 new_xi = onevar_qcqp(coefs, 0, tol)
                 if np.abs(new_xi - x[i]) > tol:
                     x[i] = new_xi
@@ -510,21 +517,24 @@ def coord_descent(self, use_sdp=True,
                     if update_counter == N:
                         converged = True
                         break
+                #print('x: ', x)
+
             if converged: break
-        if bestf > x.T@P0@x + q0.T@x + r0:
-            bestf = x.T@P0@x + q0.T@x + r0
+        if bestf > x.T*P0*x + q0.T*x + r0:
+            bestf = x.T*P0*x + q0.T*x + r0
             bestx = x
             print("best found point has objective: %.5f" % (bestf))
             #print("best found point: ", bestx)
 
         counter += 1
-        print("trial %d: %f" % (counter, bestf))
+        #print("trial %d: %f" % (counter, bestf))
 
 
     print("best found point has objective: %.5f" % (bestf))
     #print("best found point: ", bestx)
 
     assign_vars(self.variables(), bestx)
+    if self.objective.NAME == "maximize": bestf *= -1
     return bestf
 
 
