@@ -27,6 +27,35 @@ import scipy.sparse as sp
 import scipy.sparse.linalg as SLA
 from cvxpy.utilities import QuadCoeffExtractor
 from joblib import Parallel, delayed
+from utilities import onevar_qcqp
+
+# TODO
+class QuadraticFunction:
+    def __init__(self, P, q, r):
+        self.P = P
+        self.q = q
+        self.r = r
+    def P(self):
+        return self.P
+    def q(self):
+        return self.q
+    def r(self):
+        return self.r
+    def eval(self, x):
+        return x.T*(self.P*x + self.q) + self.r
+
+# TODO
+class QCQP:
+    def __init__(self, f0, fs, relops):
+        self.f0 = f0
+        self.fs = fs
+        self.relops = relops
+    def f0(self):
+        return self.f0
+    def fi(self, i):
+        return self.fs[i]
+    def relopi(self, i):
+        return self.relops[i]
 
 def get_id_map(vars):
     id_map = {}
@@ -52,25 +81,35 @@ def get_quadratic_forms(prob):
     extractor = QuadCoeffExtractor(id_map, N)
 
     P0, q0, r0 = extractor.get_coeffs(prob.objective.args[0])
-    q0 = q0.T
+    q0 = sp.csc_matrix(q0.T)
     P0 = P0[0]
+
     if prob.objective.NAME == "maximize":
         P0 = -P0
         q0 = -q0
         r0 = -r0
 
+    f0 = QuadraticFunction(P0, q0, r0)
+
     Ps = []
     qs = []
     rs = []
     relops = []
+    fs = []
     for constr in prob.constraints:
         sz = constr._expr.size[0]*constr._expr.size[1]
         Pc, qc, rc = extractor.get_coeffs(constr._expr)
         for i in range(sz):
-            Ps.append(Pc[i])
-            qs.append(qc[i, :].T)
-            rs.append(rc[i])
+            Pi = Pc[i]
+            qi = sp.csc_matrix(qc[i, :].T)
+            ri = rc[i]
+            Ps.append(Pi)
+            qs.append(qi)
+            rs.append(ri)
+            fs.append(QuadraticFunction(Pi, qi, ri))
             relops.append(constr.OP_NAME)
+
+    prob = QCQP(f0, fs, relops)
 
     return (P0, q0, r0, Ps, qs, rs, relops, id_map, N)
 
@@ -344,86 +383,15 @@ def get_violation_onevar(x, coefs):
         ret.append(max(0, p*x**2 + q*x + r))
     return ret
 
-# given interval I and array of intervals C = [I1, I2, ..., Im]
-# returns [I1 cap I, I2 cap I, ..., Im cap I]
-def interval_intersection(C, I):
-    ret = []
-    for J in C:
-        IJ = (max(I[0], J[0]), min(I[1], J[1]))
-        if IJ[0] <= IJ[1]:
-            ret.append(IJ)
-    return ret
-
-# coefs = [(p0, q0, r0), (p1, q1, r1), ..., (pm, qm, rm)]
-# returns the optimal point of the following program, or None if infeasible
-#   minimize p0 x^2 + q0 x + r0
-#   subject to pi x^2 + qi x + ri <= s
-# TODO: efficiently find feasible set using BST
-def onevar_qcqp(coefs, s, tol=1e-4):
-    # feasible set as a collection of disjoint intervals
-    C = [(-np.inf, np.inf)]
-    for cons in coefs[1:]:
-        (p, q, r) = cons
-        if p > tol:
-            D = q**2 - 4*p*(r-s)
-            if D >= 0:
-                rD = np.sqrt(D)
-                I = ((-q-rD)/(2*p), (-q+rD)/(2*p))
-                C = interval_intersection(C, I)
-            else: # never feasible
-                return None
-        elif p < -tol:
-            D = q**2 - 4*p*(r-s)
-            if D >= 0:
-                rD = np.sqrt(D)
-                I1 = (-np.inf, (-q-rD)/(2*p))
-                I2 = ((-q+rD)/(2*p), np.inf)
-                C = interval_intersection(C, I1) + interval_intersection(C, I2)
-        else:
-            if q > tol:
-                I = (-np.inf, (s-r)/q)
-            elif q < -tol:
-                I = ((s-r)/q, np.inf)
-            else:
-                continue
-            C = interval_intersection(C, I)
-    bestx = None
-    bestf = np.inf
-    (p, q, r) = coefs[0]
-    def f(x): return p*x*x + q*x + r
-    for I in C:
-        # left unbounded
-        if I[0] < 0 and np.isinf(I[0]) and (p < 0 or (p < tol and q > 0)):
-            return -np.inf
-        # right unbounded
-        if I[1] > 0 and np.isinf(I[1]) and (p < 0 or (p < tol and q < 0)):
-            return np.inf
-        (fl, fr) = (f(I[0]), f(I[1]))
-        if bestf > fl:
-            (bestx, bestf) = I[0], fl
-        if bestf > fr:
-            (bestx, bestf) = I[1], fr
-    # unconstrained minimizer
-    if p > tol:
-        x0 = -q/(2*p)
-        for I in C:
-            if I[0] <= x0 and x0 <= I[1]:
-                return x0
-    return bestx
-
 # regard x^T P x + q^T x + r as a quadratic expression in xk
 # and returns the coefficients
 # TODO: speedup
 def get_onevar_coeffs(x, k, P, q, r):
-    x1, x2 = x[:k], x[k+1:]
-    P11, P12 = P[:k, :k], P[:k, k+1:]
-    P21, P22 = P[k+1:, :k], P[k+1:, k+1:]
-    q1, q2 = q[:k], q[k+1:]
-    Pk1, Pk2 = P[:k, k], P[k+1:, k]
+    z = np.copy(x)
+    z[k] = 0
     t2 = P[k, k]
-    t1 = 2*(x1.T*Pk1 + x2.T*Pk2) + q[k, 0]
-    t0 = (x1.T*P11*x1 + x1.T*P12*x2 + x2.T*P21*x1 + x2.T*P22*x2) \
-         + (q1.T*x1 + q2.T*x2) + r
+    t1 = 2*P[k, :]*z + q[k, 0]
+    t0 = z.T*(P*z + q) + r
     return (t2, t1, t0)
 
 # rewrite the dirty stuff below
