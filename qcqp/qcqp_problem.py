@@ -45,7 +45,9 @@ def assign_vars(xs, vals):
         x.value = np.reshape(vals[ind:ind+size], x.size, order='F')
         ind += size
 
-def check_quadraticity(prob):
+def get_qcqp_form(prob):
+    """Returns the problem metadata in QCQP class
+    """
     if not prob.objective.args[0].is_quadratic():
         raise Exception("Objective is not quadratic.")
     if not all([constr._expr.is_quadratic() for constr in prob.constraints]):
@@ -53,9 +55,6 @@ def check_quadraticity(prob):
     if prob.is_dcp():
         warnings.warn("Problem is already convex; specifying solve method is unnecessary.")
 
-def get_qcqp_form(prob):
-    """Returns the problem metadata in QCQP class
-    """
     id_map, N = get_id_map(prob.variables())
     extractor = QuadCoeffExtractor(id_map, N)
 
@@ -80,9 +79,7 @@ def get_qcqp_form(prob):
             fs.append(QuadraticFunction(Pc[i], qc[i, :].T.tocsc(), rc[i]))
             relops.append(constr.OP_NAME)
 
-    prob = QCQP(f0, fs, relops)
-
-    return prob
+    return QCQP(f0, fs, relops)
 
 def solve_relaxation(prob, *args, **kwargs):
     """Solve the SDP relaxation.
@@ -126,7 +123,6 @@ def generate_samples(use_sdp, num_samples, prob, eps=1e-8, *args, **kwargs):
     return ret
 
 def sdp_relax(self, *args, **kwargs):
-    check_quadraticity(self)
     prob = get_qcqp_form(self)
     X, sdp_bound = solve_relaxation(prob, *args, **kwargs)
     if self.objective.NAME == "maximize":
@@ -137,10 +133,7 @@ def sdp_relax(self, *args, **kwargs):
 def qcqp_admm(self, use_sdp=True,
     num_samples=100, num_iters=1000, viollim=1e10,
     tol=1e-4, *args, **kwargs):
-    check_quadraticity(self)
-
     prob = get_qcqp_form(self)
-
     N, M = prob.n(), prob.m()
 
     lmb0, P0Q = map(np.asmatrix, LA.eigh(prob.f0.P.todense()))
@@ -209,7 +202,6 @@ def qcqp_admm(self, use_sdp=True,
 
 def qcqp_dccp(self, use_sdp=True, use_eigen_split=False,
     num_samples=100, *args, **kwargs):
-    check_quadraticity(self)
     try:
         import dccp
     except ImportError:
@@ -217,9 +209,7 @@ def qcqp_dccp(self, use_sdp=True, use_eigen_split=False,
         raise
 
     prob = get_qcqp_form(self)
-
-    N = prob.n()
-    M = prob.m()
+    N, M = prob.n(), prob.m()
 
     x = cvx.Variable(N)
     # dummy objective
@@ -259,12 +249,8 @@ def qcqp_dccp(self, use_sdp=True, use_eigen_split=False,
 def coord_descent(self, use_sdp=True,
     num_samples=100, num_iters=1000,
     bsearch_tol=1e-4, tol=1e-4, *args, **kwargs):
-    check_quadraticity(self)
-
     prob = get_qcqp_form(self)
-
-    N = prob.n()
-    M = prob.m()
+    N, M = prob.n(), prob.m()
 
     bestx = None
     bestf = np.inf
