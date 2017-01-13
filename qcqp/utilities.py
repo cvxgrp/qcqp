@@ -20,36 +20,93 @@ along with CVXPY.  If not, see <http://www.gnu.org/licenses/>.
 from __future__ import division
 import numpy as np
 import scipy.sparse as sp
+import cvxpy as cvx
 
+# Encodes a quadratic function x^T P x + q^T x + r,
+# with an optional relation operator '<=' or '=='
+# so that the function can also encode a constraint.
 class QuadraticFunction:
-    def __init__(self, P, q, r):
+    def __init__(self, P, q, r, relop=None):
         self.P = P
         self.q = q
         self.r = r
+        self.relop = relop
+
     def eval(self, x):
         return (x.T*(self.P*x + self.q) + self.r)[0, 0]
-    def bmat_form(self):
+
+    # Evaluates f with a cvx expression object x.
+    def eval_cvx(self, x):
+        return cvx.quad_form(x, self.P) + self.q.T*x + self.r
+
+    def violation(self, x):
+        assert self.relop is not None
+        if self.relop == '==':
+            return abs(self.eval(x))
+        else:
+            return max(0, self.eval(x))
+
+    # Returns the "homogeneous form" matrix M of the function
+    # so that (x, 1)^T M (x, 1) is same as f(x).
+    def homogeneous_form(self):
         return sp.bmat([[self.P, self.q/2], [self.q.T/2, self.r]])
 
+    # Returns QuadraticFunction f1, f2 such that
+    # f(x) = f1(x) - f2(x), with f1 and f2 both convex.
+    # Affine and constant components are always put into f1.
+    def dc_split(self, use_eigen_split=False):
+        n = self.P.shape[0]
+
+        if P.nnz == 0: # P is zero
+            P1, P2 = sp.csr_matrix((n, n)), sp.csr_matrix((n, n))
+        if use_eigen_split:
+            lmb, Q = LA.eigh(self.P.todense())
+            P1 = sum([Q[:, i]*lmb[i]*Q[:, i].T for i in range(n) if lmb[i] > 0])
+            P2 = sum([-Q[:, i]*lmb[i]*Q[:, i].T for i in range(n) if lmb[i] < 0])
+            assert abs(np.sum(P1 - P2 - P)) < 1e-8
+        else:
+            lmb_min = np.min(LA.eigh(P.todense())[0])
+            if lmb_min < 0:
+                P1 = P + (1-lmb_min)*sp.identity(n)
+                P2 = (1-lmb_min)*sp.identity(n)
+            else:
+                P1 = P
+                P2 = sp.csr_matrix((n, n))
+        f1 = QuadraticFunction(P1, self.q, self.r)
+        f2 = QuadraticFunction(P2, sp.csc_matrix((n, 1)), 0)
+        return (f1, f2)
+
+# given indefinite P
+# returns a pair of psd matrices (P+, P-) with P = P+ - P-
+def split_quadratic(P, use_eigen_split=False):
+    n = P.shape[0]
+    # zero matrix
+    if P.nnz == 0:
+        return (sp.csr_matrix((n, n)), sp.csr_matrix((n, n)))
+    if use_eigen_split:
+        lmb, Q = LA.eigh(P.todense())
+        Pp = sum([Q[:, i]*lmb[i]*Q[:, i].T for i in range(n) if lmb[i] > 0])
+        Pm = sum([-Q[:, i]*lmb[i]*Q[:, i].T for i in range(n) if lmb[i] < 0])
+        assert abs(np.sum(Pp-Pm-P))<1e-8
+        return (Pp, Pm)
+    else:
+        lmb_min = np.min(LA.eigh(P.todense())[0])
+        if lmb_min < 0:
+            return (P + (1-lmb_min)*sp.identity(n), (1-lmb_min)*sp.identity(n))
+        else:
+            return (P, sp.csr_matrix((n, n)))
+
 class QCQP:
-    def __init__(self, f0, fs, relops):
+    def __init__(self, f0, fs):
+        assert all([f.relop is not None for f in fs])
         self.f0 = f0
         self.fs = fs
-        self.relops = relops
+        self.n = f0.P.shape[0]
+        self.m = len(fs)
     def fi(self, i):
         return self.fs[i]
-    def relop(self, i):
-        return self.relops[i]
-    def n(self): # number of variables
-        return self.f0.P.shape[0]
-    def m(self): # number of constraints
-        return len(self.fs)
     def violations(self, x): # list of constraint violations
-        vals = [f.eval(x) for f in self.fs]
-        return [
-            abs(v) if relop == '==' else max(0, v)
-            for v, relop in zip(vals, self.relops)
-        ]
+        return [f.violation(x) for f in self.fs]
 
 # given interval I and array of intervals C = [I1, I2, ..., Im]
 # returns [I1 cap I, I2 cap I, ..., Im cap I]
@@ -62,15 +119,15 @@ def interval_intersection(C, I):
     return ret
 
 # TODO: optimize repeated calculations (cache factors, etc.)
-def one_qcqp(z, f, relop='<=', tol=1e-6):
+def one_qcqp(z, f, tol=1e-6):
     """ Solves a nonconvex problem
       minimize ||x-z||_2^2
       subject to f(x) = x^T P x + q^T x + r ~ 0
-      where the relation ~ is given by relop
+      where the relation ~ is given by f.relop (either <= or ==)
     """
 
     # if constraint is ineq and z is feasible: z is the solution
-    if relop == '<=' and f.eval(z) <= 0:
+    if f.relop == '<=' and f.eval(z) <= 0:
         return z
 
     lmb, Q = map(np.asmatrix, LA.eigh(f.P.todense()))
@@ -117,8 +174,7 @@ def one_qcqp(z, f, relop='<=', tol=1e-6):
 def onevar_qcqp(coefs, s, tol=1e-4):
     # feasible set as a collection of disjoint intervals
     C = [(-np.inf, np.inf)]
-    for cons in coefs[1:]:
-        (p, q, r) = cons
+    for p, q, r in coefs[1:]:
         if p > tol:
             D = q**2 - 4*p*(r-s)
             if D >= 0:
@@ -165,26 +221,6 @@ def onevar_qcqp(coefs, s, tol=1e-4):
             if I[0] <= x0 and x0 <= I[1]:
                 return x0
     return bestx
-
-# given indefinite P
-# returns a pair of psd matrices (P+, P-) with P = P+ - P-
-def split_quadratic(P, use_eigen_split=False):
-    n = P.shape[0]
-    # zero matrix
-    if P.nnz == 0:
-        return (sp.csr_matrix((n, n)), sp.csr_matrix((n, n)))
-    if use_eigen_split:
-        lmb, Q = LA.eigh(P.todense())
-        Pp = sum([Q[:, i]*lmb[i]*Q[:, i].T for i in range(n) if lmb[i] > 0])
-        Pm = sum([-Q[:, i]*lmb[i]*Q[:, i].T for i in range(n) if lmb[i] < 0])
-        assert abs(np.sum(Pp-Pm-P))<1e-8
-        return (Pp, Pm)
-    else:
-        lmb_min = np.min(LA.eigh(P.todense())[0])
-        if lmb_min < 0:
-            return (P + (1-lmb_min)*sp.identity(n), (1-lmb_min)*sp.identity(n))
-        else:
-            return (P, sp.csr_matrix((n, n)))
 
 # given coefficients triples in the form of (p, q, r)
 # returns the list of violations of px^2 + qx + r <= 0 constraints

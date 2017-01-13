@@ -28,12 +28,11 @@ import scipy.sparse.linalg as SLA
 from cvxpy.utilities import QuadCoeffExtractor
 from joblib import Parallel, delayed
 from utilities import *
-#from utilities import onevar_qcqp, QuadraticFunction, QCQP
 
-def get_id_map(vars):
+def get_id_map(xs):
     id_map = {}
     N = 0
-    for x in vars:
+    for x in xs:
         id_map[x.id] = N
         N += x.size[0]*x.size[1]
     return id_map, N
@@ -55,48 +54,41 @@ def get_qcqp_form(prob):
     if prob.is_dcp():
         warnings.warn("Problem is already convex; specifying solve method is unnecessary.")
 
-    id_map, N = get_id_map(prob.variables())
-    extractor = QuadCoeffExtractor(id_map, N)
+    extractor = QuadCoeffExtractor(*get_id_map(prob.variables()))
 
     P0, q0, r0 = extractor.get_coeffs(prob.objective.args[0])
-    P0 = P0[0]
-    q0 = q0.T.tocsc()
-    r0 = r0[0]
+    # unpacking values
+    P0, q0, r0 = P0[0], q0.T.tocsc(), r0[0]
 
     if prob.objective.NAME == "maximize":
-        P0 = -P0
-        q0 = -q0
-        r0 = -r0
+        P0, q0, r0 = -P0, -q0, -r0
 
     f0 = QuadraticFunction(P0, q0, r0)
 
     fs = []
-    relops = []
     for constr in prob.constraints:
         sz = constr._expr.size[0]*constr._expr.size[1]
         Pc, qc, rc = extractor.get_coeffs(constr._expr)
         for i in range(sz):
-            fs.append(QuadraticFunction(Pc[i], qc[i, :].T.tocsc(), rc[i]))
-            relops.append(constr.OP_NAME)
+            fs.append(QuadraticFunction(Pc[i], qc[i, :].T.tocsc(), rc[i], constr.OP_NAME))
 
-    return QCQP(f0, fs, relops)
+    return QCQP(f0, fs)
 
 def solve_relaxation(prob, *args, **kwargs):
     """Solve the SDP relaxation.
     """
 
-    N, M = prob.n(), prob.m()
     # lifted variables and semidefinite constraint
-    X = cvx.Semidef(N + 1)
+    X = cvx.Semidef(prob.n + 1)
 
-    W = prob.f0.bmat_form()
+    W = prob.f0.homogeneous_form()
     rel_obj = cvx.Minimize(cvx.sum_entries(cvx.mul_elemwise(W, X)))
-    rel_constr = [X[N, N] == 1]
+    rel_constr = [X[-1, -1] == 1]
 
-    for i in range(M):
-        W = prob.fi(i).bmat_form()
+    for f in prob.fs:
+        W = f.homogeneous_form()
         lhs = cvx.sum_entries(cvx.mul_elemwise(W, X))
-        if prob.relop(i) == '==':
+        if f.relop == '==':
             rel_constr.append(lhs == 0)
         else:
             rel_constr.append(lhs <= 0)
@@ -111,15 +103,14 @@ def solve_relaxation(prob, *args, **kwargs):
     return X.value, rel_prob.value
 
 def generate_samples(use_sdp, num_samples, prob, eps=1e-8, *args, **kwargs):
-    N = prob.n()
     if use_sdp:
         X, _ = solve_relaxation(prob, *args, **kwargs)
         mu = np.asarray(X[:-1, -1]).flatten()
-        Sigma = X[:-1, :-1] - mu*mu.T + eps*sp.identity(N)
+        Sigma = X[:-1, :-1] - mu*mu.T + eps*sp.identity(prob.n)
         samples = np.random.multivariate_normal(mu, Sigma, num_samples)
     else:
-        samples = np.random.randn(num_samples, N)
-    ret = [np.asmatrix(samples[i, :].reshape((N, 1))) for i in range(num_samples)]
+        samples = np.random.randn(num_samples, prob.n)
+    ret = [np.asmatrix(samples[i, :].reshape((prob.n, 1))) for i in range(num_samples)]
     return ret
 
 def sdp_relax(self, *args, **kwargs):
@@ -134,12 +125,11 @@ def qcqp_admm(self, use_sdp=True,
     num_samples=100, num_iters=1000, viollim=1e10,
     tol=1e-4, *args, **kwargs):
     prob = get_qcqp_form(self)
-    N, M = prob.n(), prob.m()
 
     lmb0, P0Q = map(np.asmatrix, LA.eigh(prob.f0.P.todense()))
     lmb_min = np.min(lmb0)
-    if lmb_min < 0: rho = 2*(1-lmb_min)/M
-    else: rho = 1./M
+    if lmb_min < 0: rho = 2. * (1-lmb_min) / prob.m
+    else: rho = 1. / prob.m
     rho *= 5
 
     bestx = None
@@ -147,32 +137,32 @@ def qcqp_admm(self, use_sdp=True,
 
     samples = generate_samples(use_sdp, num_samples, prob, *args, **kwargs)
 
-    def x_update(x, y, z, rho, f, relop):
-        return one_qcqp(z + (1/rho)*y, f, relop)
+    def x_update(x, y, z, rho, f):
+        return one_qcqp(z + (1/rho)*y, f)
     def y_update(x, y, z, rho):
         return y + rho*(z - x)
 
     for x0 in samples:
         z = x0
-        xs = [x0 for i in range(M)]
-        ys = [np.zeros((N, 1)) for i in range(M)]
+        xs = [x0 for i in range(prob.m)]
+        ys = [np.zeros((prob.n, 1)) for i in range(prob.m)]
         #print("trial %d: %f" % (sample, bestf))
 
-        zlhs = 2*P0 + rho*M*sp.identity(N)
+        zlhs = 2*P0 + rho*prob.m*sp.identity(prob.n)
         lstza = None
         for t in range(num_iters):
-            rhs = sum([rho*xs[i]-ys[i] for i in range(M)]) - q0
+            rhs = sum([rho*x - y for x, y in zip(xs, ys)]) - q0
             z = np.asmatrix(SLA.spsolve(zlhs.tocsr(), rhs)).T
             xs = Parallel(n_jobs=4)(
-                delayed(x_update)(xs[i], ys[i], z, rho, prob.fi(i), prob.relop(i))
-                for i in range(M)
+                delayed(x_update)(xs[i], ys[i], z, rho, prob.fi(i))
+                for i in range(prob.m)
             )
             ys = Parallel(n_jobs=4)(
                 delayed(y_update)(xs[i], ys[i], z, rho)
-                for i in range(M)
+                for i in range(prob.m)
             )
 
-            za = (sum(xs)+z)/(M+1)
+            za = (sum(xs)+z) / (prob.m + 1.)
             #if lstza is not None and LA.norm(lstza-za) < tol:
             #    break
             lstza = za
@@ -209,24 +199,21 @@ def qcqp_dccp(self, use_sdp=True, use_eigen_split=False,
         raise
 
     prob = get_qcqp_form(self)
-    N, M = prob.n(), prob.m()
 
-    x = cvx.Variable(N)
+    x = cvx.Variable(prob.n)
     # dummy objective
     T = cvx.Variable()
 
     obj = cvx.Minimize(T)
-    P0p, P0m = split_quadratic(prob.f0.P, use_eigen_split)
-    cons = [cvx.quad_form(x, P0p)+prob.f0.q*x+prob.f0.r <= cvx.quad_form(x, P0m)+T]
+    f0p, f0m = prob.f0.dc_split(use_eigen_split)
+    cons = [f0p.eval_cvx(x) <= f0m.eval_cvx(x) + T]
 
-    for i in range(M):
-        Pp, Pm = split_quadratic(prob.fi(i).P, use_eigen_split)
-        lhs = cvx.quad_form(x, Pp)+prob.fi(i).q.T*x+prob.fi(i).r
-        rhs = cvx.quad_form(x, Pm)
-        if relops[i] == '==':
-            cons.append(lhs == rhs)
+    for f in prob.fs:
+        fp, fm = f.dc_split(use_eigen_split)
+        if f.relop == '==':
+            cons.append(fp.eval_cvx(x) == fm.eval_cvx(x))
         else:
-            cons.append(lhs <= rhs)
+            cons.append(fp.eval_cvx(x) <= fm.eval_cvx(x))
 
     samples = generate_samples(use_sdp, num_samples, prob, *args, **kwargs)
 
@@ -250,31 +237,27 @@ def coord_descent(self, use_sdp=True,
     num_samples=100, num_iters=1000,
     bsearch_tol=1e-4, tol=1e-4, *args, **kwargs):
     prob = get_qcqp_form(self)
-    N, M = prob.n(), prob.m()
 
     bestx = None
     bestf = np.inf
 
     samples = generate_samples(use_sdp, num_samples, prob, *args, **kwargs)
 
-    # debugging purpose
-    counter = 0
     for x in samples:
-        # TODO: give some epsilon slack to equality constraint
         # number of iterations since last infeasibility improvement
         update_counter = 0
         # phase 1: optimize infeasibility
         failed = False
         while True:
             # optimize over x[i]
-            for i in range(N):
+            for i in range(prob.n):
                 coefs = [(0, 0, 0)]
-                for j in range(M):
+                for f in prob.fs:
                     # quadratic, linear, constant terms
-                    c = get_onevar_coeffs(x, i, prob.fi(j))
+                    c = get_onevar_coeffs(x, i, f)
                     # constraint not relevant to xi is ignored
                     if abs(c[0]) > tol or abs(c[1]) > tol:
-                        if prob.relop(j) == '<=':
+                        if f.relop == '<=':
                             coefs.append(c)
                         else:
                             coefs.append(c)
@@ -300,7 +283,7 @@ def coord_descent(self, use_sdp=True,
                     update_counter = 0
                 else:
                     update_counter += 1
-                    if update_counter == N:
+                    if update_counter == prob.n:
                         failed = True
                         break
             if failed: break
@@ -313,14 +296,14 @@ def coord_descent(self, use_sdp=True,
         converged = False
         for t in range(num_iters):
             # optimize over x[i]
-            for i in range(N):
+            for i in range(prob.n):
                 coefs = [get_onevar_coeffs(x, i, prob.f0)]
-                for j in range(M):
+                for f in prob.fs:
                     # quadratic, linear, constant terms
-                    c = get_onevar_coeffs(x, i, prob.fi(j))
+                    c = get_onevar_coeffs(x, i, f)
                     # constraint not relevant to xi is ignored
                     if abs(c[0]) > tol or abs(c[1]) > tol:
-                        if prob.relop(j) == '<=':
+                        if f.relop == '<=':
                             coefs.append(c)
                         else:
                             coefs.append(c)
@@ -331,7 +314,7 @@ def coord_descent(self, use_sdp=True,
                     update_counter = 0
                 else:
                     update_counter += 1
-                    if update_counter == N:
+                    if update_counter == prob.n:
                         converged = True
                         break
                 #print('x: ', x)
@@ -343,10 +326,6 @@ def coord_descent(self, use_sdp=True,
             bestx = x
             print("best found point has objective: %.5f" % (bestf))
             #print("best found point: ", bestx)
-
-        counter += 1
-        #print("trial %d: %f" % (counter, bestf))
-
 
     print("best found point has objective: %.5f" % (bestf))
     #print("best found point: ", bestx)
