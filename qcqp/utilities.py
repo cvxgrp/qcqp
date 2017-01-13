@@ -27,9 +27,7 @@ import cvxpy as cvx
 # so that the function can also encode a constraint.
 class QuadraticFunction:
     def __init__(self, P, q, r, relop=None):
-        self.P = P
-        self.q = q
-        self.r = r
+        self.P, self.q, self.r = P, q, r
         self.relop = relop
 
     def eval(self, x):
@@ -75,6 +73,10 @@ class QuadraticFunction:
         f1 = QuadraticFunction(P1, self.q, self.r)
         f2 = QuadraticFunction(P2, sp.csc_matrix((n, 1)), 0)
         return (f1, f2)
+
+class OneVarQuadraticFunction(QuadraticFunction):
+    def eval(self, x):
+        return x*(self.P*x + self.q) + self.r
 
 # given indefinite P
 # returns a pair of psd matrices (P+, P-) with P = P+ - P-
@@ -166,15 +168,27 @@ def one_qcqp(z, f, tol=1e-6):
     x = Q*xhat
     return x
 
-# coefs = [(p0, q0, r0), (p1, q1, r1), ..., (pm, qm, rm)]
 # returns the optimal point of the following program, or None if infeasible
-#   minimize p0 x^2 + q0 x + r0
-#   subject to pi x^2 + qi x + ri <= s
+#   minimize f0(x)
+#   subject to fi(x) ~ s
+# where the only variable is a real number x
+# The relation operator ~ can be <= or ==. In case ~ is ==,
+# the constraint should mean |fi(x)| <= s.
 # TODO: efficiently find feasible set using BST
-def onevar_qcqp(coefs, s, tol=1e-4):
+# TODO: rewrite the relop handling
+def onevar_qcqp(f0, fs0, s, tol=1e-4):
+    # rewrite below without explicitly exploding equality constraints
+    fs = []
+    for f in fs0:
+        fs.append(f)
+        if f.relop == '==':
+            p, q, r = -f.P, -f.q, -f.r-tol
+            fs.append(OneVarQuadraticFunction(p, q, r))
+
     # feasible set as a collection of disjoint intervals
     C = [(-np.inf, np.inf)]
-    for p, q, r in coefs[1:]:
+    for f in fs:
+        p, q, r = f.P, f.q, f.r
         if p > tol:
             D = q**2 - 4*p*(r-s)
             if D >= 0:
@@ -198,10 +212,10 @@ def onevar_qcqp(coefs, s, tol=1e-4):
             else:
                 continue
             C = interval_intersection(C, I)
+
     bestx = None
     bestf = np.inf
-    (p, q, r) = coefs[0]
-    def f(x): return p*x*x + q*x + r
+    p, q, r = f0.P, f0.q, f0.r
     for I in C:
         # left unbounded
         if I[0] < 0 and np.isinf(I[0]) and (p < 0 or (p < tol and q > 0)):
@@ -209,7 +223,7 @@ def onevar_qcqp(coefs, s, tol=1e-4):
         # right unbounded
         if I[1] > 0 and np.isinf(I[1]) and (p < 0 or (p < tol and q < 0)):
             return np.inf
-        (fl, fr) = (f(I[0]), f(I[1]))
+        (fl, fr) = (f0.eval(I[0]), f0.eval(I[1]))
         if bestf > fl:
             (bestx, bestf) = I[0], fl
         if bestf > fr:
@@ -222,23 +236,15 @@ def onevar_qcqp(coefs, s, tol=1e-4):
                 return x0
     return bestx
 
-# given coefficients triples in the form of (p, q, r)
-# returns the list of violations of px^2 + qx + r <= 0 constraints
-def get_violation_onevar(x, coefs):
-    ret = []
-    for c in coefs:
-        p, q, r = c
-        ret.append(max(0, p*x**2 + q*x + r))
-    return ret
-
-# regard f(x) as a quadratic expression in xk and returns the coefficients
-# where f is an instance of QuadraticFunction
+# regard f(x) as a quadratic expression in xk and returns the
+# one-variable function.
+# f is an instance of QuadraticFunction
+# return value is an instance of OneVarQuadraticFunction
 # TODO: speedup
-def get_onevar_coeffs(x, k, f):
+def get_onevar_func(x, k, f):
     z = np.copy(x)
     z[k] = 0
     t2 = f.P[k, k]
     t1 = 2*f.P[k, :]*z + f.q[k, 0]
     t0 = z.T*(f.P*z + f.q) + f.r
-    return (t2, t1, t0)
-
+    return OneVarQuadraticFunction(t2, t1, t0, f.relop)

@@ -47,6 +47,7 @@ def assign_vars(xs, vals):
 def get_qcqp_form(prob):
     """Returns the problem metadata in QCQP class
     """
+    # Check quadraticity
     if not prob.objective.args[0].is_quadratic():
         raise Exception("Objective is not quadratic.")
     if not all([constr._expr.is_quadratic() for constr in prob.constraints]):
@@ -251,19 +252,11 @@ def coord_descent(self, use_sdp=True,
         while True:
             # optimize over x[i]
             for i in range(prob.n):
-                coefs = [(0, 0, 0)]
-                for f in prob.fs:
-                    # quadratic, linear, constant terms
-                    c = get_onevar_coeffs(x, i, f)
-                    # constraint not relevant to xi is ignored
-                    if abs(c[0]) > tol or abs(c[1]) > tol:
-                        if f.relop == '<=':
-                            coefs.append(c)
-                        else:
-                            coefs.append(c)
-                            coefs.append((-c[0], -c[1], -c[2]-tol))
-
-                viol = max(get_violation_onevar(x[i], coefs))
+                obj = OneVarQuadraticFunction(0, 0, 0)
+                nfs = [get_onevar_func(x, i, f) for f in prob.fs]
+                # TODO: this shouldn't be here
+                nfs = [f for f in nfs if abs(f.P) > tol or abs(f.q) > tol]
+                viol = max([f.violation(x[i]) for f in nfs])
                 #print('current violation in %d: %f' % (i, viol))
                 #print('x: ', x)
                 new_xi = x[i]
@@ -271,7 +264,7 @@ def coord_descent(self, use_sdp=True,
                 ss, es = 0, viol
                 while es - ss > bsearch_tol:
                     s = (ss + es) / 2
-                    xi = onevar_qcqp(coefs, s, tol)
+                    xi = onevar_qcqp(obj, nfs, s, tol)
                     if xi is None:
                         ss = s
                     else:
@@ -297,18 +290,11 @@ def coord_descent(self, use_sdp=True,
         for t in range(num_iters):
             # optimize over x[i]
             for i in range(prob.n):
-                coefs = [get_onevar_coeffs(x, i, prob.f0)]
-                for f in prob.fs:
-                    # quadratic, linear, constant terms
-                    c = get_onevar_coeffs(x, i, f)
-                    # constraint not relevant to xi is ignored
-                    if abs(c[0]) > tol or abs(c[1]) > tol:
-                        if f.relop == '<=':
-                            coefs.append(c)
-                        else:
-                            coefs.append(c)
-                            coefs.append((-c[0], -c[1], -c[2]-tol))
-                new_xi = onevar_qcqp(coefs, 0, tol)
+                obj = get_onevar_func(x, i, prob.f0)
+                nfs = [get_onevar_func(x, i, f) for f in prob.fs]
+                # TODO: this shouldn't be here
+                nfs = [f for f in nfs if abs(f.P) > tol or abs(f.q) > tol]
+                new_xi = onevar_qcqp(obj, nfs, 0, tol)
                 if np.abs(new_xi - x[i]) > tol:
                     x[i] = new_xi
                     update_counter = 0
