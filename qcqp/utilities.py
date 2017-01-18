@@ -177,6 +177,8 @@ def one_qcqp(z, f, tol=1e-6):
 # TODO: efficiently find feasible set using BST
 # TODO: rewrite the relop handling
 def onevar_qcqp(f0, fs0, s, tol=1e-4):
+    s += tol
+
     # rewrite below without explicitly exploding equality constraints
     fs = []
     for f in fs0:

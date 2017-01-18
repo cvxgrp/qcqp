@@ -264,7 +264,7 @@ def coord_descent(self, use_sdp=True,
                 ss, es = 0, viol
                 while es - ss > bsearch_tol:
                     s = (ss + es) / 2
-                    xi = onevar_qcqp(obj, nfs, s, tol)
+                    xi = onevar_qcqp(obj, nfs, s)
                     if xi is None:
                         ss = s
                     else:
@@ -294,7 +294,7 @@ def coord_descent(self, use_sdp=True,
                 nfs = [get_onevar_func(x, i, f) for f in prob.fs]
                 # TODO: this shouldn't be here
                 nfs = [f for f in nfs if abs(f.P) > tol or abs(f.q) > tol]
-                new_xi = onevar_qcqp(obj, nfs, 0, tol)
+                new_xi = onevar_qcqp(obj, nfs, 0)
                 if np.abs(new_xi - x[i]) > tol:
                     x[i] = new_xi
                     update_counter = 0
