@@ -21,6 +21,7 @@ from __future__ import division
 import numpy as np
 import scipy.sparse as sp
 import cvxpy as cvx
+from numpy import linalg as LA
 
 # Encodes a quadratic function x^T P x + q^T x + r,
 # with an optional relation operator '<=' or '=='
@@ -40,9 +41,10 @@ class QuadraticFunction:
     def violation(self, x):
         assert self.relop is not None
         if self.relop == '==':
-            return abs(self.eval(x))
+            ret = abs(self.eval(x))
         else:
-            return max(0, self.eval(x))
+            ret = max(0, self.eval(x))
+        return ret
 
     # Returns the "homogeneous form" matrix M of the function
     # so that (x, 1)^T M (x, 1) is same as f(x).
@@ -55,26 +57,29 @@ class QuadraticFunction:
     def dc_split(self, use_eigen_split=False):
         n = self.P.shape[0]
 
-        if P.nnz == 0: # P is zero
+        if self.P.nnz == 0: # P is zero
             P1, P2 = sp.csr_matrix((n, n)), sp.csr_matrix((n, n))
         if use_eigen_split:
             lmb, Q = LA.eigh(self.P.todense())
             P1 = sum([Q[:, i]*lmb[i]*Q[:, i].T for i in range(n) if lmb[i] > 0])
             P2 = sum([-Q[:, i]*lmb[i]*Q[:, i].T for i in range(n) if lmb[i] < 0])
-            assert abs(np.sum(P1 - P2 - P)) < 1e-8
+            assert abs(np.sum(P1 - P2 - self.P)) < 1e-8
         else:
-            lmb_min = np.min(LA.eigh(P.todense())[0])
+            lmb_min = np.min(LA.eigh(self.P.todense())[0])
             if lmb_min < 0:
-                P1 = P + (1-lmb_min)*sp.identity(n)
+                P1 = self.P + (1-lmb_min)*sp.identity(n)
                 P2 = (1-lmb_min)*sp.identity(n)
             else:
-                P1 = P
+                P1 = self.P
                 P2 = sp.csr_matrix((n, n))
         f1 = QuadraticFunction(P1, self.q, self.r)
         f2 = QuadraticFunction(P2, sp.csc_matrix((n, 1)), 0)
         return (f1, f2)
 
 class OneVarQuadraticFunction(QuadraticFunction):
+    def __repr__(self):
+        return '%+.3f x^2 %+.3f x %+.3f' % (self.P, self.q, self.r)
+
     def eval(self, x):
         return x*(self.P*x + self.q) + self.r
 
@@ -121,7 +126,7 @@ def interval_intersection(C, I):
     return ret
 
 # TODO: optimize repeated calculations (cache factors, etc.)
-def one_qcqp(z, f, tol=1e-6):
+def onecons_qcqp(z, f, tol=1e-6):
     """ Solves a nonconvex problem
       minimize ||x-z||_2^2
       subject to f(x) = x^T P x + q^T x + r ~ 0
@@ -177,8 +182,6 @@ def one_qcqp(z, f, tol=1e-6):
 # TODO: efficiently find feasible set using BST
 # TODO: rewrite the relop handling
 def onevar_qcqp(f0, fs0, s, tol=1e-4):
-    s += tol
-
     # rewrite below without explicitly exploding equality constraints
     fs = []
     for f in fs0:
@@ -192,7 +195,7 @@ def onevar_qcqp(f0, fs0, s, tol=1e-4):
     for f in fs:
         p, q, r = f.P, f.q, f.r
         if p > tol:
-            D = q**2 - 4*p*(r-s)
+            D = q*q - 4*p*(r-s)
             if D >= 0:
                 rD = np.sqrt(D)
                 I = ((-q-rD)/(2*p), (-q+rD)/(2*p))
@@ -200,7 +203,7 @@ def onevar_qcqp(f0, fs0, s, tol=1e-4):
             else: # never feasible
                 return None
         elif p < -tol:
-            D = q**2 - 4*p*(r-s)
+            D = q*q - 4*p*(r-s)
             if D >= 0:
                 rD = np.sqrt(D)
                 I1 = (-np.inf, (-q-rD)/(2*p))
@@ -215,9 +218,11 @@ def onevar_qcqp(f0, fs0, s, tol=1e-4):
                 continue
             C = interval_intersection(C, I)
 
-    bestx = None
+    bestxs = []
     bestf = np.inf
     p, q, r = f0.P, f0.q, f0.r
+
+    # endpoints of feasible intervals
     for I in C:
         # left unbounded
         if I[0] < 0 and np.isinf(I[0]) and (p < 0 or (p < tol and q > 0)):
@@ -227,16 +232,27 @@ def onevar_qcqp(f0, fs0, s, tol=1e-4):
             return np.inf
         (fl, fr) = (f0.eval(I[0]), f0.eval(I[1]))
         if bestf > fl:
-            (bestx, bestf) = I[0], fl
+            (bestxs, bestf) = [I[0]], fl
+        elif bestf == fl:
+            bestxs.append(I[0])
         if bestf > fr:
-            (bestx, bestf) = I[1], fr
+            (bestxs, bestf) = [I[1]], fr
+        elif bestf == fr:
+            bestxs.append(I[1])
+
     # unconstrained minimizer
     if p > tol:
         x0 = -q/(2*p)
         for I in C:
             if I[0] <= x0 and x0 <= I[1]:
                 return x0
-    return bestx
+
+    if len(bestxs) == 0:
+        return None
+    else:
+        # to prevent smallest x being chosen every time
+        # TODO: if an entire interval is feasible, pick a random point in an interval
+        return np.random.choice(bestxs)
 
 # regard f(x) as a quadratic expression in xk and returns the
 # one-variable function.
@@ -245,8 +261,8 @@ def onevar_qcqp(f0, fs0, s, tol=1e-4):
 # TODO: speedup
 def get_onevar_func(x, k, f):
     z = np.copy(x)
-    z[k] = 0
+    z[k,0] = 0
     t2 = f.P[k, k]
-    t1 = 2*f.P[k, :]*z + f.q[k, 0]
-    t0 = z.T*(f.P*z + f.q) + f.r
+    t1 = (2*f.P[k, :]*z + f.q[k, 0])[0, 0]
+    t0 = (z.T*(f.P*z + f.q) + f.r)[0, 0]
     return OneVarQuadraticFunction(t2, t1, t0, f.relop)

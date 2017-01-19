@@ -21,12 +21,12 @@ from __future__ import division
 import warnings
 import cvxpy as cvx
 import numpy as np
-from numpy import linalg as LA
 import cvxpy.lin_ops.lin_utils as lu
 import scipy.sparse as sp
+from numpy import linalg as LA
 import scipy.sparse.linalg as SLA
 from cvxpy.utilities import QuadCoeffExtractor
-from joblib import Parallel, delayed
+#from joblib import Parallel, delayed
 from utilities import *
 
 def get_id_map(xs):
@@ -38,11 +38,16 @@ def get_id_map(xs):
     return id_map, N
 
 def assign_vars(xs, vals):
-    ind = 0
-    for x in xs:
-        size = x.size[0]*x.size[1]
-        x.value = np.reshape(vals[ind:ind+size], x.size, order='F')
-        ind += size
+    if vals is None:
+        for x in xs:
+            size = x.size[0]*x.size[1]
+            x.value = np.full(x.size, np.nan)
+    else:
+        ind = 0
+        for x in xs:
+            size = x.size[0]*x.size[1]
+            x.value = np.reshape(vals[ind:ind+size], x.size, order='F')
+            ind += size
 
 def get_qcqp_form(prob):
     """Returns the problem metadata in QCQP class
@@ -103,6 +108,8 @@ def solve_relaxation(prob, *args, **kwargs):
 
     return X.value, rel_prob.value
 
+# TODO: make it return Python array of Numpy arrays, instead of
+# Python array of Numpy matrices
 def generate_samples(use_sdp, num_samples, prob, eps=1e-8, *args, **kwargs):
     if use_sdp:
         X, _ = solve_relaxation(prob, *args, **kwargs)
@@ -111,6 +118,7 @@ def generate_samples(use_sdp, num_samples, prob, eps=1e-8, *args, **kwargs):
         samples = np.random.multivariate_normal(mu, Sigma, num_samples)
     else:
         samples = np.random.randn(num_samples, prob.n)
+    # ret = [samples[i, :].flatten() for i in range(num_samples)]
     ret = [np.asmatrix(samples[i, :].reshape((prob.n, 1))) for i in range(num_samples)]
     return ret
 
@@ -124,14 +132,16 @@ def sdp_relax(self, *args, **kwargs):
 
 def qcqp_admm(self, use_sdp=True,
     num_samples=100, num_iters=1000, viollim=1e10,
-    tol=1e-4, *args, **kwargs):
+    tol=1e-4, rho=None, *args, **kwargs):
     prob = get_qcqp_form(self)
 
-    lmb0, P0Q = map(np.asmatrix, LA.eigh(prob.f0.P.todense()))
-    lmb_min = np.min(lmb0)
-    if lmb_min < 0: rho = 2. * (1-lmb_min) / prob.m
-    else: rho = 1. / prob.m
-    rho *= 5
+    if rho is None:
+        lmb0, P0Q = map(np.asmatrix, LA.eigh(prob.f0.P.todense()))
+        lmb_min = np.min(lmb0)
+        if lmb_min < 0: rho = 2. * (1-lmb_min) / prob.m
+        else: rho = 1. / prob.m
+        rho *= 5
+        print('setting rho to %.5f' % rho)
 
     bestx = None
     bestf = np.inf
@@ -139,7 +149,7 @@ def qcqp_admm(self, use_sdp=True,
     samples = generate_samples(use_sdp, num_samples, prob, *args, **kwargs)
 
     def x_update(x, y, z, rho, f):
-        return one_qcqp(z + (1/rho)*y, f)
+        return onecons_qcqp(z + (1/rho)*y, f)
     def y_update(x, y, z, rho):
         return y + rho*(z - x)
 
@@ -149,19 +159,26 @@ def qcqp_admm(self, use_sdp=True,
         ys = [np.zeros((prob.n, 1)) for i in range(prob.m)]
         #print("trial %d: %f" % (sample, bestf))
 
-        zlhs = 2*P0 + rho*prob.m*sp.identity(prob.n)
+        zlhs = 2*prob.f0.P + rho*prob.m*sp.identity(prob.n)
         lstza = None
         for t in range(num_iters):
-            rhs = sum([rho*x - y for x, y in zip(xs, ys)]) - q0
+            rhs = sum([rho*x - y for x, y in zip(xs, ys)]) - prob.f0.q
             z = np.asmatrix(SLA.spsolve(zlhs.tocsr(), rhs)).T
-            xs = Parallel(n_jobs=4)(
-                delayed(x_update)(xs[i], ys[i], z, rho, prob.fi(i))
-                for i in range(prob.m)
-            )
-            ys = Parallel(n_jobs=4)(
-                delayed(y_update)(xs[i], ys[i], z, rho)
-                for i in range(prob.m)
-            )
+
+            for i in range(prob.m):
+                xs[i] = x_update(xs[i], ys[i], z, rho, prob.fi(i))
+            for x, y in zip(xs, ys):
+                y = y_update(x, y, z, rho)
+
+            # Disabling parallel x-update until a good way is found
+            # xs = Parallel(n_jobs=4)(
+            #    delayed(x_update)(xs[i], ys[i], z, rho, prob.fs[i])
+            #    for i in range(prob.m)
+            # )
+            # ys = Parallel(n_jobs=4)(
+            #     delayed(y_update)(xs[i], ys[i], z, rho)
+            #     for i in range(prob.m)
+            # )
 
             za = (sum(xs)+z) / (prob.m + 1.)
             #if lstza is not None and LA.norm(lstza-za) < tol:
@@ -169,7 +186,7 @@ def qcqp_admm(self, use_sdp=True,
             lstza = za
             maxviol = max(prob.violations(za))
 
-            #print(t, maxviol)
+            print(t, maxviol)
 
             objt = prob.f0.eval(za)
             if maxviol > viollim:
@@ -249,17 +266,20 @@ def coord_descent(self, use_sdp=True,
         update_counter = 0
         # phase 1: optimize infeasibility
         failed = False
+        print('phase 1 starts')
+        # TODO: correct termination condition with tolerance
+        viol_last = np.inf
         while True:
             # optimize over x[i]
             for i in range(prob.n):
                 obj = OneVarQuadraticFunction(0, 0, 0)
                 nfs = [get_onevar_func(x, i, f) for f in prob.fs]
-                # TODO: this shouldn't be here
+                # TODO: maybe this shouldn't be here?
                 nfs = [f for f in nfs if abs(f.P) > tol or abs(f.q) > tol]
-                viol = max([f.violation(x[i]) for f in nfs])
+                viol = max([f.violation(x[i,0]) for f in nfs])
                 #print('current violation in %d: %f' % (i, viol))
                 #print('x: ', x)
-                new_xi = x[i]
+                new_xi = x[i,0]
                 new_viol = viol
                 ss, es = 0, viol
                 while es - ss > bsearch_tol:
@@ -271,20 +291,27 @@ def coord_descent(self, use_sdp=True,
                         new_xi = xi
                         new_viol = s
                         es = s
-                if new_viol < viol:
-                    x[i] = new_xi
+                if new_viol < viol - tol:
+                    x[i,0] = new_xi
                     update_counter = 0
                 else:
                     update_counter += 1
                     if update_counter == prob.n:
                         failed = True
                         break
-            if failed: break
+            #if failed: break
             viol = max(prob.violations(x))
-            if viol < tol: break
+            if viol_last <= viol + tol or viol < tol:
+                break
+            viol_last = viol
+            print(viol, x, update_counter)
 
+        # TODO: find correct termination condition with tolerance
         # phase 2: optimize objective over feasible points
-        if failed: continue
+        #if failed: continue
+        if viol_last > tol*10: continue
+        print('phase 2 starts')
+        fval = prob.f0.eval(x)
         update_counter = 0
         converged = False
         for t in range(num_iters):
@@ -292,11 +319,11 @@ def coord_descent(self, use_sdp=True,
             for i in range(prob.n):
                 obj = get_onevar_func(x, i, prob.f0)
                 nfs = [get_onevar_func(x, i, f) for f in prob.fs]
-                # TODO: this shouldn't be here
+                # TODO: maybe this shouldn't be here?
                 nfs = [f for f in nfs if abs(f.P) > tol or abs(f.q) > tol]
-                new_xi = onevar_qcqp(obj, nfs, 0)
-                if np.abs(new_xi - x[i]) > tol:
-                    x[i] = new_xi
+                new_xi = onevar_qcqp(obj, nfs, tol)
+                if new_xi is not None and np.abs(new_xi - x[i,0]) > tol:
+                    x[i,0] = new_xi
                     update_counter = 0
                 else:
                     update_counter += 1
