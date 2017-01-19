@@ -22,17 +22,23 @@ import numpy as np
 import scipy.sparse as sp
 import cvxpy as cvx
 from numpy import linalg as LA
+import logging
 
 # Encodes a quadratic function x^T P x + q^T x + r,
 # with an optional relation operator '<=' or '=='
 # so that the function can also encode a constraint.
+#   P is a scipy sparse matrix of size n*n
+#   q is a scipy sparse matrix of size 1*n
+#   r is a scalar
 class QuadraticFunction:
     def __init__(self, P, q, r, relop=None):
         self.P, self.q, self.r = P, q, r
+        self.qarray = np.squeeze(np.asarray(q.todense()))
         self.relop = relop
 
+    # Evalutes f with a numpy array x.
     def eval(self, x):
-        return (x.T*(self.P*x + self.q) + self.r)[0, 0]
+        return (self.P.dot(x) + self.qarray).dot(x) + self.r
 
     # Evaluates f with a cvx expression object x.
     def eval_cvx(self, x):
@@ -43,7 +49,7 @@ class QuadraticFunction:
         if self.relop == '==':
             ret = abs(self.eval(x))
         else:
-            ret = max(0, self.eval(x))
+            ret = max(0., self.eval(x))
         return ret
 
     # Returns the "homogeneous form" matrix M of the function
@@ -76,32 +82,29 @@ class QuadraticFunction:
         f2 = QuadraticFunction(P2, sp.csc_matrix((n, 1)), 0)
         return (f1, f2)
 
+    # Returns the one-variable function when regarding f(x)
+    # as a quadratic expression in x[k].
+    # f is an instance of QuadraticFunction
+    # return value is an instance of OneVarQuadraticFunction
+    # TODO: speedup
+    def get_onevar_func(self, x, k):
+        z = np.copy(x)
+        z[k] = 0
+        t2 = self.P[k, k]
+        t1 = 2*self.P[k, :].dot(z)[0] + self.qarray[k]
+        t0 = (self.P.dot(z) + self.qarray).dot(z) + self.r
+        return OneVarQuadraticFunction(t2, t1, t0, self.relop)
+
 class OneVarQuadraticFunction(QuadraticFunction):
+    def __init__(self, P, q, r, relop=None):
+        self.P, self.q, self.r = P, q, r
+        self.relop = relop
+
     def __repr__(self):
         return '%+.3f x^2 %+.3f x %+.3f' % (self.P, self.q, self.r)
 
     def eval(self, x):
         return x*(self.P*x + self.q) + self.r
-
-# given indefinite P
-# returns a pair of psd matrices (P+, P-) with P = P+ - P-
-def split_quadratic(P, use_eigen_split=False):
-    n = P.shape[0]
-    # zero matrix
-    if P.nnz == 0:
-        return (sp.csr_matrix((n, n)), sp.csr_matrix((n, n)))
-    if use_eigen_split:
-        lmb, Q = LA.eigh(P.todense())
-        Pp = sum([Q[:, i]*lmb[i]*Q[:, i].T for i in range(n) if lmb[i] > 0])
-        Pm = sum([-Q[:, i]*lmb[i]*Q[:, i].T for i in range(n) if lmb[i] < 0])
-        assert abs(np.sum(Pp-Pm-P))<1e-8
-        return (Pp, Pm)
-    else:
-        lmb_min = np.min(LA.eigh(P.todense())[0])
-        if lmb_min < 0:
-            return (P + (1-lmb_min)*sp.identity(n), (1-lmb_min)*sp.identity(n))
-        else:
-            return (P, sp.csr_matrix((n, n)))
 
 class QCQP:
     def __init__(self, f0, fs):
@@ -137,48 +140,46 @@ def onecons_qcqp(z, f, tol=1e-6):
     if f.relop == '<=' and f.eval(z) <= 0:
         return z
 
-    lmb, Q = map(np.asmatrix, LA.eigh(f.P.todense()))
-    zhat = Q.T*z
-    qhat = Q.T*f.q
+    lmb, Q = LA.eigh(np.asarray(f.P.todense()))
+    zhat = Q.T.dot(z)
+    qhat = Q.T.dot(f.qarray)
 
     # now solve a transformed problem
     # minimize ||xhat - zhat||_2^2
     # subject to sum(lmb_i xhat_i^2) + qhat^T xhat + r = 0
     # constraint is now equality from
     # complementary slackness
-    def phi(nu):
-        xhat = -np.divide(nu*qhat-2*zhat, 2*(1+nu*lmb.T))
-        return (lmb*np.power(xhat, 2) + qhat.T*xhat + f.r)[0, 0]
+    xhat = lambda nu: -np.divide(nu*qhat-2*zhat, 2*(1+nu*lmb))
+    phi = lambda xhat: lmb.dot(np.power(xhat, 2)) + qhat.dot(xhat) + f.r
+
     s = -np.inf
     e = np.inf
-    for l in np.nditer(lmb):
+    for l in lmb:
         if l > 0: s = max(s, -1./l)
         if l < 0: e = min(e, -1./l)
     if s == -np.inf:
         s = -1.
-        while phi(s) <= 0: s *= 2.
+        while phi(xhat(s)) <= 0: s *= 2.
     if e == np.inf:
         e = 1.
-        while phi(e) >= 0: e *= 2.
+        while phi(xhat(e)) >= 0: e *= 2.
     while e-s > tol:
         m = (s+e)/2.
-        p = phi(m)
+        p = phi(xhat(m))
         if p > 0: s = m
         elif p < 0: e = m
         else:
             s = e = m
             break
     nu = (s+e)/2.
-    xhat = -np.divide(nu*qhat-2*zhat, 2*(1+nu*lmb.T))
-    x = Q*xhat
-    return x
+    return Q.dot(xhat(nu))
 
 # returns the optimal point of the following program, or None if infeasible
 #   minimize f0(x)
 #   subject to fi(x) ~ s
 # where the only variable is a real number x
 # The relation operator ~ can be <= or ==. In case ~ is ==,
-# the constraint should mean |fi(x)| <= s.
+# the constraint means |fi(x)| <= s.
 # TODO: efficiently find feasible set using BST
 # TODO: rewrite the relop handling
 def onevar_qcqp(f0, fs0, s, tol=1e-4):
@@ -250,19 +251,7 @@ def onevar_qcqp(f0, fs0, s, tol=1e-4):
     if len(bestxs) == 0:
         return None
     else:
-        # to prevent smallest x being chosen every time
-        # TODO: if an entire interval is feasible, pick a random point in an interval
+        # TODO: to prevent smallest x being chosen every time,
+        # if obj is constant and an entire interval is feasible,
+        # pick a random point from the interval
         return np.random.choice(bestxs)
-
-# regard f(x) as a quadratic expression in xk and returns the
-# one-variable function.
-# f is an instance of QuadraticFunction
-# return value is an instance of OneVarQuadraticFunction
-# TODO: speedup
-def get_onevar_func(x, k, f):
-    z = np.copy(x)
-    z[k,0] = 0
-    t2 = f.P[k, k]
-    t1 = (2*f.P[k, :]*z + f.q[k, 0])[0, 0]
-    t0 = (z.T*(f.P*z + f.q) + f.r)[0, 0]
-    return OneVarQuadraticFunction(t2, t1, t0, f.relop)
