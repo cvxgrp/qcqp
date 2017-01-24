@@ -22,6 +22,8 @@ import numpy as np
 import scipy.sparse as sp
 import cvxpy as cvx
 from numpy import linalg as LA
+from collections import defaultdict
+from itertools import chain
 import logging
 
 # Encodes a quadratic function x^T P x + q^T x + r,
@@ -174,50 +176,66 @@ def onecons_qcqp(z, f, tol=1e-6):
     nu = (s+e)/2.
     return Q.dot(xhat(nu))
 
+# TODO: maybe cleanup below
+def get_feasible_intervals(f, s=0, tol=1e-4):
+    p, q, r = f.P, f.q, f.r
+    if f.relop == '==': # |px^2 + qx + r| <= s
+        f1 = OneVarQuadraticFunction(p, q, r-s, '<=')
+        f2 = OneVarQuadraticFunction(-p, -q, -r-s, '<=')
+        I1 = get_feasible_intervals(f1)
+        I2 = get_feasible_intervals(f2)
+        I = []
+        for i1 in I1:
+            for i2 in I2:
+                i = (max(i1[0], i2[0]), min(i1[1], i2[1]))
+                if i[0] <= i[1]:
+                    I.append(i)
+    else: # px^2 + qx + r-s <= 0
+        if p > tol:
+            D = q*q - 4*p*(r-s)
+            if D >= 0:
+                rD = np.sqrt(D)
+                I = [((-q-rD)/(2*p), (-q+rD)/(2*p))]
+            else: # never feasible
+                I = []
+        elif p < -tol:
+            D = q*q - 4*p*(r-s)
+            if D >= 0:
+                rD = np.sqrt(D)
+                # note that p < 0
+                I = [(-np.inf, (q+rD)/(2*p)), ((q-rD)/(2*p), np.inf)]
+            else: # always feasible
+                I = [(-np.inf, np.inf)]
+        else:
+            if q > tol:
+                I = [(-np.inf, (s-r)/q)]
+            elif q < -tol:
+                I = [((s-r)/q, np.inf)]
+            else: # always feasible
+                I = [(-np.inf, np.inf)]
+    return I
+
+
 # returns the optimal point of the following program, or None if infeasible
 #   minimize f0(x)
 #   subject to fi(x) ~ s
 # where the only variable is a real number x
 # The relation operator ~ can be <= or ==. In case ~ is ==,
 # the constraint means |fi(x)| <= s.
-# TODO: efficiently find feasible set using BST
-# TODO: rewrite the relop handling
-def onevar_qcqp(f0, fs0, s, tol=1e-4):
-    # rewrite below without explicitly exploding equality constraints
-    fs = []
-    for f in fs0:
-        fs.append(f)
-        if f.relop == '==':
-            p, q, r = -f.P, -f.q, -f.r-tol
-            fs.append(OneVarQuadraticFunction(p, q, r))
-
-    # feasible set as a collection of disjoint intervals
-    C = [(-np.inf, np.inf)]
-    for f in fs:
-        p, q, r = f.P, f.q, f.r
-        if p > tol:
-            D = q*q - 4*p*(r-s)
-            if D >= 0:
-                rD = np.sqrt(D)
-                I = ((-q-rD)/(2*p), (-q+rD)/(2*p))
-                C = interval_intersection(C, I)
-            else: # never feasible
-                return None
-        elif p < -tol:
-            D = q*q - 4*p*(r-s)
-            if D >= 0:
-                rD = np.sqrt(D)
-                I1 = (-np.inf, (-q-rD)/(2*p))
-                I2 = ((-q+rD)/(2*p), np.inf)
-                C = interval_intersection(C, I1) + interval_intersection(C, I2)
-        else:
-            if q > tol:
-                I = (-np.inf, (s-r)/q)
-            elif q < -tol:
-                I = ((s-r)/q, np.inf)
-            else:
-                continue
-            C = interval_intersection(C, I)
+def onevar_qcqp(f0, fs, s, tol=1e-4):
+    Is = list(chain(*[get_feasible_intervals(f, s) for f in fs]))
+    m = len(fs)
+    counts = defaultdict(lambda: 0, {-np.inf: +1, +np.inf: -1})
+    for I in Is:
+        counts[I[0]] += 1
+        counts[I[1]] -= 1
+    xs = [x for x in sorted(counts.items()) if x[1] != 0]
+    C = []
+    tot = 0
+    for i in range(len(xs)):
+        tot += xs[i][1]
+        if tot == m and xs[i][1] == -1:
+            C.append((xs[i-1][0], xs[i][0]))
 
     bestxs = []
     bestf = np.inf

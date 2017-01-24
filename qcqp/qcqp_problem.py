@@ -28,7 +28,7 @@ from cvxpy.utilities import QuadCoeffExtractor
 from utilities import *
 import logging
 
-logging.basicConfig(filename='qcqp.log', filemode='w', level=logging.INFO)
+logging.basicConfig(filename='qcqp.log', filemode='w', level=logging.DEBUG)
 
 def get_id_map(xs):
     id_map = {}
@@ -241,7 +241,7 @@ def qcqp_dccp(self, use_sdp=True, use_eigen_split=False,
 # TODO: rewrite the dirty stuff below
 def coord_descent(self, use_sdp=True,
     num_samples=100, num_iters=1000,
-    bsearch_tol=1e-4, tol=1e-4, *args, **kwargs):
+    bsearch_tol=1e-4, viol_tol=1e-3, tol=1e-4, *args, **kwargs):
     prob = get_qcqp_form(self)
 
     bestx = None
@@ -257,7 +257,7 @@ def coord_descent(self, use_sdp=True,
         logging.info("Phase 1 starts")
         # TODO: correct termination condition with tolerance
         viol_last = np.inf
-        while True:
+        while viol_last > viol_tol:
             # optimize over x[i]
             for i in range(prob.n):
                 obj = OneVarQuadraticFunction(0, 0, 0)
@@ -279,9 +279,10 @@ def coord_descent(self, use_sdp=True,
                         new_xi = xi
                         new_viol = s
                         es = s
-                if new_viol < viol - tol:
+                if new_viol < viol:
                     x[i] = new_xi
                     update_counter = 0
+                    logging.debug("Violation reduction %.3f -> %.3f", viol, new_viol)
                 else:
                     update_counter += 1
                     if update_counter == prob.n:
@@ -289,15 +290,15 @@ def coord_descent(self, use_sdp=True,
                         break
             #if failed: break
             viol = max(prob.violations(x))
-            if viol_last <= viol + tol or viol < tol:
+            logging.info("Current maximum violation: %.6f, %.6f", viol, viol_last)
+            if viol_last <= viol + tol:
                 break
             viol_last = viol
-            logging.info("Current maximum violation: %.3f", viol)
 
         # TODO: find correct termination condition with tolerance
         # phase 2: optimize objective over feasible points
         #if failed: continue
-        if viol_last > tol*10: continue
+        if viol_last > viol_tol: continue
         logging.info("Phase 2 starts")
         fval = prob.f0.eval(x)
         update_counter = 0
