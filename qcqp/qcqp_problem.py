@@ -197,7 +197,7 @@ def qcqp_admm(self, use_sdp=True,
     return bestf
 
 def qcqp_dccp(self, use_sdp=True, use_eigen_split=False,
-    num_samples=100, *args, **kwargs):
+    num_samples=100, tau=0.005, *args, **kwargs):
     try:
         import dccp
     except ImportError:
@@ -228,11 +228,13 @@ def qcqp_dccp(self, use_sdp=True, use_eigen_split=False,
     bestf = np.inf
     for x0 in samples:
         x.value = x0
-        val = prob.solve(method='dccp')[0]
-        if val is not None and bestf > val:
-            bestf = val
-            bestx = x.value
-            logging.info("Found best point with objective: %.5f", bestf)
+        result = prob.solve(method='dccp', tau=tau)
+        if result is not None:
+            val = result[0]
+            if val is not None and bestf > val:
+                bestf = val
+                bestx = x.value
+                logging.info("Found best point with objective: %.5f", bestf)
 
     assign_vars(self.variables(), x.value)
     if self.objective.NAME == "maximize": bestf *= -1

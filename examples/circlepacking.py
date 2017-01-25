@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import qcqp
 
-N = 2 # number of circles
+N = 5 # number of circles
 X = cvx.Variable(2, N)
 B = 10
 r = cvx.Variable()

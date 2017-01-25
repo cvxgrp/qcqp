@@ -106,6 +106,10 @@ class OneVarQuadraticFunction(QuadraticFunction):
         return '%+.3f x^2 %+.3f x %+.3f' % (self.P, self.q, self.r)
 
     def eval(self, x):
+        if np.isinf(x):
+            if self.P != 0: return self.P*x*x
+            if self.q != 0: return self.q*x
+            return r
         return x*(self.P*x + self.q) + self.r
 
 class QCQP:
@@ -119,16 +123,6 @@ class QCQP:
         return self.fs[i]
     def violations(self, x): # list of constraint violations
         return [f.violation(x) for f in self.fs]
-
-# given interval I and array of intervals C = [I1, I2, ..., Im]
-# returns [I1 cap I, I2 cap I, ..., Im cap I]
-def interval_intersection(C, I):
-    ret = []
-    for J in C:
-        IJ = (max(I[0], J[0]), min(I[1], J[1]))
-        if IJ[0] <= IJ[1]:
-            ret.append(IJ)
-    return ret
 
 # TODO: optimize repeated calculations (cache factors, etc.)
 def onecons_qcqp(z, f, tol=1e-6):
@@ -176,18 +170,15 @@ def onecons_qcqp(z, f, tol=1e-6):
     nu = (s+e)/2.
     return Q.dot(xhat(nu))
 
-# TODO: maybe cleanup below
 def get_feasible_intervals(f, s=0, tol=1e-4):
     p, q, r = f.P, f.q, f.r
     if f.relop == '==': # |px^2 + qx + r| <= s
         f1 = OneVarQuadraticFunction(p, q, r-s, '<=')
         f2 = OneVarQuadraticFunction(-p, -q, -r-s, '<=')
-        I1 = get_feasible_intervals(f1)
-        I2 = get_feasible_intervals(f2)
         I = []
-        for i1 in I1:
-            for i2 in I2:
-                i = (max(i1[0], i2[0]), min(i1[1], i2[1]))
+        for I1 in get_feasible_intervals(f1):
+            for I2 in get_feasible_intervals(f2):
+                i = (max(I1[0], I2[0]), min(I1[1], I2[1]))
                 if i[0] <= i[1]:
                     I.append(i)
     else: # px^2 + qx + r-s <= 0
@@ -223,6 +214,7 @@ def get_feasible_intervals(f, s=0, tol=1e-4):
 # The relation operator ~ can be <= or ==. In case ~ is ==,
 # the constraint means |fi(x)| <= s.
 def onevar_qcqp(f0, fs, s, tol=1e-4):
+    # O(m log m) routine for finding feasible set
     Is = list(chain(*[get_feasible_intervals(f, s) for f in fs]))
     m = len(fs)
     counts = defaultdict(lambda: 0, {-np.inf: +1, +np.inf: -1})
@@ -237,18 +229,24 @@ def onevar_qcqp(f0, fs, s, tol=1e-4):
         if tot == m and xs[i][1] == -1:
             C.append((xs[i-1][0], xs[i][0]))
 
+    # no feasible points
+    if len(C) == 0: return None
+
     bestxs = []
     bestf = np.inf
-    p, q, r = f0.P, f0.q, f0.r
+    p, q = f0.P, f0.q
 
+    # any point in C works
+    # not using tolerance to check zeroness
+    if p == 0 and q == 0:
+        return np.random.uniform(*C[np.random.choice(len(C))])
+
+    # unconstrained minimizer
+    x0 = -q/(2.*p) if p > 0 else np.nan
     # endpoints of feasible intervals
     for I in C:
-        # left unbounded
-        if I[0] < 0 and np.isinf(I[0]) and (p < 0 or (p < tol and q > 0)):
-            return -np.inf
-        # right unbounded
-        if I[1] > 0 and np.isinf(I[1]) and (p < 0 or (p < tol and q < 0)):
-            return np.inf
+        if I[0] <= x0 and x0 <= I[1]: return x0
+        # note that endpoints or the function values can be +-inf
         (fl, fr) = (f0.eval(I[0]), f0.eval(I[1]))
         if bestf > fl:
             (bestxs, bestf) = [I[0]], fl
@@ -259,17 +257,7 @@ def onevar_qcqp(f0, fs, s, tol=1e-4):
         elif bestf == fr:
             bestxs.append(I[1])
 
-    # unconstrained minimizer
-    if p > tol:
-        x0 = -q/(2*p)
-        for I in C:
-            if I[0] <= x0 and x0 <= I[1]:
-                return x0
-
     if len(bestxs) == 0:
         return None
     else:
-        # TODO: to prevent smallest x being chosen every time,
-        # if obj is constant and an entire interval is feasible,
-        # pick a random point from the interval
         return np.random.choice(bestxs)
