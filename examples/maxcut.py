@@ -3,7 +3,7 @@ import numpy as np
 import cvxpy as cvx
 import qcqp
 
-n = 15
+n = 5
 np.random.seed(1)
 
 # Make adjacency matrix.
@@ -32,7 +32,7 @@ x_round = np.sign(np.random.randn(n, 1))
 # Lower bounds
 lb_simple = f(x_round)
 lb_cd = prob.solve(method='coord-descent', solver=cvx.MOSEK, num_samples=10)
-lb_admm = prob.solve(method='qcqp-admm', solver=cvx.MOSEK, num_samples=10, num_iters=10, rho=10)
+lb_admm = prob.solve(method='qcqp-admm', solver=cvx.MOSEK, num_samples=10)
 lb_dccp = prob.solve(method='qcqp-dccp', solver=cvx.MOSEK, num_samples=10, tau=1)
 print ('Upper bound: %.3f' % ub)
 print ('Lower bounds:')

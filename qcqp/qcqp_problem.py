@@ -104,8 +104,7 @@ def solve_relaxation(prob, *args, **kwargs):
     rel_prob.solve(*args, **kwargs)
 
     if rel_prob.status not in [cvx.OPTIMAL, cvx.OPTIMAL_INACCURATE]:
-        logging.warning("Relaxation problem status: %s", rel_prob.status)
-        return None, rel_prob.value
+        raise Exception("Relaxation problem status: %s" % rel_prob.status)
 
     return X.value, rel_prob.value
 
@@ -127,18 +126,33 @@ def sdp_relax(self, *args, **kwargs):
     assign_vars(self.variables(), X[:, -1])
     return sdp_bound
 
-def qcqp_admm(self, use_sdp=True,
-    num_samples=100, num_iters=1000, viollim=1e10,
+def admm_phase1(prob, x0, num_iters=100):
+    z = x0
+    xs = [np.copy(x0) for i in range(prob.m)]
+    us = [np.zeros(prob.n) for i in range(prob.m)]
+
+    for t in range(num_iters):
+        z = (sum(xs)-sum(us))/prob.m
+        for i in range(prob.m):
+            x, u, f = xs[i], us[i], prob.fi(i)
+            xs[i] = onecons_qcqp(z + u, f)
+        us = [u + z - x for u, x in zip(us, xs)]
+    return z
+
+def qcqp_admm(self, use_sdp=True, num_samples=100,
+    num_iters=100, viollim=1e4,
     tol=1e-4, rho=None, *args, **kwargs):
     prob = get_qcqp_form(self)
 
+    # TODO: find a reasonable auto parameter
     if rho is None:
         lmb0, P0Q = map(np.asmatrix, LA.eigh(prob.f0.P.todense()))
         lmb_min = np.min(lmb0)
-        if lmb_min < 0: rho = 2. * (1-lmb_min) / prob.m
-        else: rho = 1. / prob.m
-        rho *= 5
-        logging.warning("Automatically setting missing rho to %.3f", rho)
+        lmb_max = np.max(lmb0)
+        if lmb_min < 0: rho = 2.*(1.-lmb_min)/prob.m
+        else: rho = 1./prob.m
+        rho = max(rho, 40.*lmb_max/prob.m)
+        logging.warning("Automatically setting rho to %.3f", rho)
 
     bestx = None
     bestf = np.inf
@@ -146,48 +160,49 @@ def qcqp_admm(self, use_sdp=True,
     samples = generate_samples(use_sdp, num_samples, prob, *args, **kwargs)
 
     for x0 in samples:
+        x0 = admm_phase1(prob, x0, num_iters)
+        if max(prob.violations(x0)) < tol:
+            fx0 = prob.f0.eval(x0)
+            if bestf > fx0:
+                bestf = fx0
+                bestx = x0
+                logging.info("Found best point")
+                logging.info("Best objective: %.5f", bestf)
+                logging.debug("Best point: %s", bestx)
+
         z = x0
-        xs = [x0 for i in range(prob.m)]
-        ys = [np.zeros(prob.n) for i in range(prob.m)]
+        xs = [np.copy(x0) for i in range(prob.m)]
+        us = [np.zeros(prob.n) for i in range(prob.m)]
 
         zlhs = 2*prob.f0.P + rho*prob.m*sp.identity(prob.n)
-        lstza = None
+        last_z = None
         for t in range(num_iters):
-            rhs = sum([rho*x - y for x, y in zip(xs, ys)]) - prob.f0.qarray
+            rhs = rho*(sum(xs)-sum(us)) - prob.f0.qarray
             z = SLA.spsolve(zlhs.tocsr(), rhs)
 
-            for x, y, f in zip(xs, ys, prob.fs):
-                x = onecons_qcqp(z + (1/rho)*y, f)
-            for x, y in zip(xs, ys):
-                y += rho*(z - x)
-
-            # TODO: disabling parallel x-update until I find a good way
-            # xs = Parallel(n_jobs=4)(
-            #    delayed(x_update)(xs[i], ys[i], z, rho, prob.fs[i])
-            #    for i in range(prob.m)
-            # )
-            # ys = Parallel(n_jobs=4)(
-            #     delayed(y_update)(xs[i], ys[i], z, rho)
-            #     for i in range(prob.m)
-            # )
+            # TODO: parallel x/u-updates
+            for i in range(prob.m):
+                x, u, f = xs[i], us[i], prob.fi(i)
+                xs[i] = onecons_qcqp(z + u, f)
+            for i in range(prob.m):
+                us[i] = z - xs[i]
 
             # TODO: termination condition
-            za = (sum(xs) + z) / (prob.m + 1.)
-            #if lstza is not None and LA.norm(lstza-za) < tol:
-            #    break
-            lstza = za
-            maxviol = max(prob.violations(za))
+            if last_z is not None and LA.norm(last_z-z) < tol:
+                break
+            last_z = z
 
+            maxviol = max(prob.violations(z))
             logging.info("Iteration %d, violation %.3f", t, maxviol)
 
-            objt = prob.f0.eval(za)
+            fz = prob.f0.eval(z)
             if maxviol > viollim:
-                rho *= 2
+                rho *= 10
                 break
 
-            if maxviol < tol and bestf > objt:
-                bestf = objt
-                bestx = za
+            if maxviol < tol and bestf > fz:
+                bestf = fz
+                bestx = z
                 logging.info("Found best point at iteration %d", t)
                 logging.info("Best objective: %.5f", bestf)
                 logging.debug("Best point: %s", bestx)
