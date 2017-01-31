@@ -65,7 +65,7 @@ def get_qcqp_form(prob):
 
     P0, q0, r0 = extractor.get_coeffs(prob.objective.args[0])
     # unpacking values
-    P0, q0, r0 = P0[0], q0.T.tocsc(), r0[0]
+    P0, q0, r0 = (P0[0]+P0[0].T)/2., q0.T.tocsc(), r0[0]
 
     if prob.objective.NAME == "maximize":
         P0, q0, r0 = -P0, -q0, -r0
@@ -77,7 +77,7 @@ def get_qcqp_form(prob):
         sz = constr._expr.size[0]*constr._expr.size[1]
         Pc, qc, rc = extractor.get_coeffs(constr._expr)
         for i in range(sz):
-            fs.append(QuadraticFunction(Pc[i], qc[i, :].T.tocsc(), rc[i], constr.OP_NAME))
+            fs.append(QuadraticFunction((Pc[i]+Pc[i].T)/2., qc[i, :].T.tocsc(), rc[i], constr.OP_NAME))
 
     return QCQP(f0, fs)
 
@@ -243,7 +243,7 @@ def qcqp_dccp(self, use_sdp=True, use_eigen_split=False,
     bestf = np.inf
     for x0 in samples:
         x.value = x0
-        result = prob.solve(method='dccp', tau=tau)
+        result = prob.solve(method='dccp', solver=cvx.MOSEK, tau=tau)
         if result is not None:
             val = result[0]
             if val is not None and bestf > val:

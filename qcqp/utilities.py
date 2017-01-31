@@ -136,7 +136,8 @@ def onecons_qcqp(z, f, tol=1e-6):
     if f.relop == '<=' and f.eval(z) <= 0:
         return z
 
-    lmb, Q = LA.eigh(np.asarray(f.P.todense()))
+    Psymm = (f.P + f.P.T)/2.
+    lmb, Q = LA.eigh(np.asarray(Psymm.todense()))
     zhat = Q.T.dot(z)
     qhat = Q.T.dot(f.qarray)
 
