@@ -28,7 +28,7 @@ from cvxpy.utilities import QuadCoeffExtractor
 from utilities import *
 import logging
 
-logging.basicConfig(filename='qcqp.log', filemode='w', level=logging.DEBUG)
+logging.basicConfig(filename='qcqp.log', filemode='w', level=logging.INFO)
 
 def get_id_map(xs):
     id_map = {}
@@ -243,13 +243,15 @@ def qcqp_dccp(self, use_sdp=True, use_eigen_split=False,
     bestf = np.inf
     for x0 in samples:
         x.value = x0
-        result = prob.solve(method='dccp', solver=cvx.MOSEK, tau=tau)
-        if result is not None:
-            val = result[0]
-            if val is not None and bestf > val:
-                bestf = val
-                bestx = x.value
-                logging.info("Found best point with objective: %.5f", bestf)
+        try:
+            result = prob.solve(method='dccp', solver=cvx.MOSEK, tau=tau)
+            if prob.status == "Converged":
+                if bestf > result[0]:
+                    bestf = result[0]
+                    bestx = x.value
+                    logging.info("Found best point with objective: %.5f", bestf)
+        except cvx.error.SolverError:
+            pass
 
     assign_vars(self.variables(), x.value)
     if self.objective.NAME == "maximize": bestf *= -1
@@ -307,15 +309,15 @@ def coord_descent(self, use_sdp=True,
                         break
             #if failed: break
             viol = max(prob.violations(x))
-            logging.info("Current maximum violation: %.6f, %.6f", viol, viol_last)
-            if viol_last <= viol + tol:
+            logging.info("Maximum violation: %.6f -> %.6f", viol_last, viol)
+            if viol_last <= viol + bsearch_tol:
                 break
             viol_last = viol
 
         # TODO: find correct termination condition with tolerance
         # phase 2: optimize objective over feasible points
         #if failed: continue
-        if viol_last > viol_tol: continue
+        if viol > viol_tol: continue
         logging.info("Phase 2 starts")
         fval = prob.f0.eval(x)
         update_counter = 0
