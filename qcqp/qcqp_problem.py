@@ -136,7 +136,8 @@ def admm_phase1(prob, x0, num_iters=100):
         for i in range(prob.m):
             x, u, f = xs[i], us[i], prob.fi(i)
             xs[i] = onecons_qcqp(z + u, f)
-        us = [u + z - x for u, x in zip(us, xs)]
+        for i in range(prob.m):
+            us[i] = us[i] + z - xs[i]
     return z
 
 def qcqp_admm(self, use_sdp=True, num_samples=100,
@@ -145,6 +146,15 @@ def qcqp_admm(self, use_sdp=True, num_samples=100,
     prob = get_qcqp_form(self)
 
     # TODO: find a reasonable auto parameter
+    if rho is not None:
+        lmb0, P0Q = map(np.asmatrix, LA.eigh(prob.f0.P.todense()))
+        lmb_min = np.min(lmb0)
+        if lmb_min + prob.m*rho < 0:
+            logging.error("rho parameter is too small, z-update not convex.")
+            logging.error("Minimum possible value of rho: %.3f\n", -lmb_min/prob.m)
+            logging.error("Given value of rho: %.3f\n", rho)
+            raise
+
     if rho is None:
         lmb0, P0Q = map(np.asmatrix, LA.eigh(prob.f0.P.todense()))
         lmb_min = np.min(lmb0)
@@ -174,10 +184,10 @@ def qcqp_admm(self, use_sdp=True, num_samples=100,
         xs = [np.copy(x0) for i in range(prob.m)]
         us = [np.zeros(prob.n) for i in range(prob.m)]
 
-        zlhs = 2*prob.f0.P + rho*prob.m*sp.identity(prob.n)
+        zlhs = 2*(prob.f0.P + rho*prob.m*sp.identity(prob.n))
         last_z = None
         for t in range(num_iters):
-            rhs = rho*(sum(xs)-sum(us)) - prob.f0.qarray
+            rhs = 2*rho*(sum(xs)-sum(us)) - prob.f0.qarray
             z = SLA.spsolve(zlhs.tocsr(), rhs)
 
             # TODO: parallel x/u-updates
@@ -185,7 +195,7 @@ def qcqp_admm(self, use_sdp=True, num_samples=100,
                 x, u, f = xs[i], us[i], prob.fi(i)
                 xs[i] = onecons_qcqp(z + u, f)
             for i in range(prob.m):
-                us[i] = z - xs[i]
+                us[i] = us[i] + z - xs[i]
 
             # TODO: termination condition
             if last_z is not None and LA.norm(last_z-z) < tol:

@@ -21,7 +21,7 @@ l = 2
 tau = 10
 eta = 1
 
-np.random.seed(1)
+#np.random.seed(1)
 HR = np.random.randn(m, n)/np.sqrt(2);
 HI = np.random.randn(m, n)/np.sqrt(2);
 H1 = np.hstack((HR, HI))
@@ -46,7 +46,7 @@ print ('Lower bound: %.3f' % lb)
 
 # Upper bounds
 print ('Upper bounds:')
-ub_admm = prob.solve(method='qcqp-admm', use_sdp=False, solver=cvx.MOSEK, num_samples=10, rho=np.sqrt(m+l))
+ub_admm = prob.solve(method='qcqp-admm', use_sdp=False, solver=cvx.MOSEK, num_samples=10, rho=np.sqrt(m+l), num_iters=1000)
 print ('  Nonconvex ADMM: %.3f' % ub_admm)
 ub_dccp = prob.solve(method='qcqp-dccp', use_sdp=False, solver=cvx.MOSEK, num_samples=10, tau=1)
 print ('  Convex-concave programming: %.3f' % ub_dccp)
