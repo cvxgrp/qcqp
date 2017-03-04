@@ -3,7 +3,7 @@ import numpy as np
 import cvxpy as cvx
 import qcqp
 
-n = 5
+n = 25
 np.random.seed(1)
 
 # Make adjacency matrix.
@@ -22,21 +22,21 @@ prob = cvx.Problem(cvx.Maximize(obj), cons)
 
 # Objective function
 f = lambda x: 0.25*(np.sum(W) - (x_round.T*W*x_round)[0, 0])
+def violation(x):
+    return np.max(np.abs(np.square(x) - 1))
 
 # SDP-based upper bound
 ub = prob.solve(method='sdp-relax', solver=cvx.MOSEK)
-
-# Random feasible point
-x_round = np.sign(np.random.randn(n, 1))
+print ('Upper bound: %.3f' % ub)
 
 # Lower bounds
-lb_simple = f(x_round)
-lb_cd = prob.solve(method='coord-descent', solver=cvx.MOSEK, num_samples=10)
-lb_admm = prob.solve(method='qcqp-admm', solver=cvx.MOSEK, num_samples=10)
-lb_dccp = prob.solve(method='qcqp-dccp', solver=cvx.MOSEK, num_samples=10, tau=1)
-print ('Upper bound: %.3f' % ub)
-print ('Lower bounds:')
-print ('  Random feasible point: %.3f' % lb_simple)
-print ('  Coordinate descent: %.3f' % lb_cd)
-print ('  Nonconvex ADMM: %.3f' % lb_admm)
-print ('  Convex-concave programming: %.3f' % lb_dccp)
+print ('(objective, maximum violation):')
+f_dccp = prob.solve(method='qcqp-dccp', use_sdp=False, solver=cvx.MOSEK, num_samples=10, tau=1)
+print ('  Convex-concave programming: (%.3f, %.3f)' % (f_dccp, violation(x.value)))
+x_round = np.sign(np.random.randn(n, 1))
+f_simple = f(x_round)
+print ('  Random feasible point: (%.3f, %.3f)' % (f_simple, violation(x_round)))
+f_cd = prob.solve(method='coord-descent', use_sdp=False, num_samples=10)
+print ('  Coordinate descent: (%.3f, %.3f)' % (f_cd, violation(x.value)))
+f_admm = prob.solve(method='qcqp-admm', use_sdp=False, num_samples=10, num_iters=100)
+print ('  Nonconvex ADMM: (%.3f, %.3f)' % (f_admm, violation(x.value)))

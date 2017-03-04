@@ -126,7 +126,7 @@ def sdp_relax(self, *args, **kwargs):
     assign_vars(self.variables(), X[:, -1])
     return sdp_bound
 
-def admm_phase1(prob, x0, num_iters=100):
+def admm_phase1(prob, x0, tol=1e-4, num_iters=100):
     z = x0
     xs = [np.copy(x0) for i in range(prob.m)]
     us = [np.zeros(prob.n) for i in range(prob.m)]
@@ -137,7 +137,10 @@ def admm_phase1(prob, x0, num_iters=100):
             x, u, f = xs[i], us[i], prob.fi(i)
             xs[i] = onecons_qcqp(z + u, f)
         for i in range(prob.m):
-            us[i] = us[i] + z - xs[i]
+            us[i] += z - xs[i]
+        if max(prob.violations(z)) < tol:
+            break
+
     return z
 
 def qcqp_admm(self, use_sdp=True, num_samples=100,
@@ -161,7 +164,6 @@ def qcqp_admm(self, use_sdp=True, num_samples=100,
         lmb_max = np.max(lmb0)
         if lmb_min < 0: rho = 2.*(1.-lmb_min)/prob.m
         else: rho = 1./prob.m
-        rho = max(rho, 40.*lmb_max/prob.m)
         logging.warning("Automatically setting rho to %.3f", rho)
 
     bestx = None
@@ -170,7 +172,7 @@ def qcqp_admm(self, use_sdp=True, num_samples=100,
     samples = generate_samples(use_sdp, num_samples, prob, *args, **kwargs)
 
     for x0 in samples:
-        x0 = admm_phase1(prob, x0, num_iters)
+        x0 = admm_phase1(prob, x0, tol, num_iters)
         if max(prob.violations(x0)) < tol:
             fx0 = prob.f0.eval(x0)
             if bestf > fx0:
@@ -195,7 +197,7 @@ def qcqp_admm(self, use_sdp=True, num_samples=100,
                 x, u, f = xs[i], us[i], prob.fi(i)
                 xs[i] = onecons_qcqp(z + u, f)
             for i in range(prob.m):
-                us[i] = us[i] + z - xs[i]
+                us[i] += z - xs[i]
 
             # TODO: termination condition
             if last_z is not None and LA.norm(last_z-z) < tol:
@@ -207,7 +209,7 @@ def qcqp_admm(self, use_sdp=True, num_samples=100,
 
             fz = prob.f0.eval(z)
             if maxviol > viollim:
-                rho *= 10
+                rho *= 2
                 break
 
             if maxviol < tol and bestf > fz:
