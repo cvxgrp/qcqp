@@ -14,14 +14,14 @@ import cvxpy as cvx
 import qcqp
 
 # n, m, l: 100, 30, 10
-n = 10
-m = 3
-l = 2
+n = 30
+m = 10
+l = 3
 
 tau = 10
 eta = 1
 
-#np.random.seed(1)
+np.random.seed(1)
 HR = np.random.randn(m, n)/np.sqrt(2);
 HI = np.random.randn(m, n)/np.sqrt(2);
 H1 = np.hstack((HR, HI))
@@ -40,15 +40,20 @@ cons = [
 ]
 prob = cvx.Problem(obj, cons)
 
+def violation(w):
+    v1 = tau - (np.square(H1*w) + np.square(H2*w))
+    v2 = (np.square(G1*w) + np.square(G2*w)) - eta
+    return max(np.max(v1), np.max(v2), 0)
+
 # SDP-based lower bound
 lb = prob.solve(method='sdp-relax', solver=cvx.MOSEK)
 print ('Lower bound: %.3f' % lb)
 
 # Upper bounds
-print ('Upper bounds:')
-ub_admm = prob.solve(method='qcqp-admm', use_sdp=False, solver=cvx.MOSEK, num_samples=10, rho=np.sqrt(m+l), num_iters=1000)
-print ('  Nonconvex ADMM: %.3f' % ub_admm)
-ub_dccp = prob.solve(method='qcqp-dccp', use_sdp=False, solver=cvx.MOSEK, num_samples=10, tau=1)
-print ('  Convex-concave programming: %.3f' % ub_dccp)
-ub_cd = prob.solve(method='coord-descent', use_sdp=False, solver=cvx.MOSEK, num_samples=10)
-print ('  Coordinate descent: %.3f' % ub_cd)
+print ('(objective, maximum violation):')
+ub_admm = prob.solve(method='qcqp-admm', use_sdp=False, solver=cvx.MOSEK, num_samples=10, rho=np.sqrt(m+l), num_iters=1000, tol=5e-2)
+print ('  Nonconvex ADMM: (%.3f, %.3f)' % (ub_admm, violation(w.value)))
+#ub_dccp = prob.solve(method='qcqp-dccp', use_sdp=False, solver=cvx.MOSEK, num_samples=10, tau=1)
+#print ('  Convex-concave programming: (%.3f, %.3f)' % (ub_dccp, violation(w.value)))
+#ub_cd = prob.solve(method='coord-descent', use_sdp=False, solver=cvx.MOSEK, num_samples=10)
+#print ('  Coordinate descent: (%.3f, %.3f)' % (ub_cd, violation(w.value)))
