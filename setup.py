@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='qcqp',
-    version='0.5',
+    version='0.6',
     author='Jaehyun Park, Stephen Boyd',
     author_email='jpark@cs.stanford.edu, boyd@stanford.edu',
     packages=['qcqp'],
