@@ -3,8 +3,10 @@ QCQP
 
 QCQP is a package for modeling and solving quadratically constrained quadratic programs (QCQPs) that are not necessarily convex, using heuristics and relaxations.
 Our heuristics are based on the *Suggest-and-Improve* framework:
+
 * *Suggest* method finds a candidate point for a local method.
 * *Improve* method takes a point from the *Suggest* method and performs a local search to find a better point.
+
 The notion of better points is defined by the maximum violation of a point and the objective value.
 See our associated paper (to be posted online) for more information on the *Suggest-and-Improve* framework.
 For the older version of the paper discussing the semidefinite relaxation (SDR) and randomized algorithms, see [here](http://stanford.edu/class/ee364b/lectures/relaxations.pdf).
@@ -70,11 +72,16 @@ To apply the Suggest and Improve methods on a QCQP, the corresponding CVXPY prob
 ```
 qcqp = QCQP(problem)
 ```
+
 Currently two *Suggest* methods are available for QCQPs:
+
 * ``qcqp.suggest()`` fills the values of the variables using independent and identically distributed Gaussian random variables.
 * ``qcqp.suggest(sdp=True)`` fills the values of the variables drawn from an optimal probability distribution given by the semidefinite relaxation. Once the *Suggest* method is executed with the ``sdp`` flag, a lower bound (or an upper bound, in the case of a maximization problem) on the optimal value is accessible via ``qcqp.sdp_bound``.
+
 Below is a list of available solve methods for QCQPs:
+
 * ``qcqp.improve(ADMM)`` attempts to improve the given point via consensus [alternating directions method of multipliers](http://stanford.edu/~boyd/admm.html) (ADMM). An optional parameter ``rho`` can be specified.
 * ``qcqp.improve(DCCP)`` automatically splits indefinite quadratic functions to convex and concave parts, then invokes the [DCCP](https://github.com/cvxgrp/dccp) package, using the given point as a starting point. An optional parameter ``tau`` can be specified.
 * ``qcqp.improve(COORD_DESCENT)`` performs a two-stage coordinate descent algorithm. The first stage tries to find a feasible point. If a feasible point is found, then the second stage tries to optimize the objective function over the set of feasible points.
+
 Both ``improve()`` and ``suggest()`` methods return a pair ``(f, v)``, where ``f`` represents the current objective value, and ``v`` represents the maximum constraint violation of the current point.
