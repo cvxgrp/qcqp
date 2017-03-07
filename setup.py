@@ -6,7 +6,7 @@ setup(
     author='Jaehyun Park, Stephen Boyd',
     author_email='jpark@cs.stanford.edu, boyd@stanford.edu',
     packages=['qcqp'],
-    license='GPLv3',
+    license='MIT',
     zip_safe=False,
     install_requires=["cvxpy >= 0.4.8",
                       "CVXcanon >= 0.1.1",
