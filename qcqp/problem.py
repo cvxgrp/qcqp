@@ -164,6 +164,7 @@ def qcqp_admm(self, use_sdp=True, num_samples=100,
         lmb_max = np.max(lmb0)
         if lmb_min < 0: rho = 2.*(1.-lmb_min)/prob.m
         else: rho = 1./prob.m
+        rho *= 50.
         logging.warning("Automatically setting rho to %.3f", rho)
 
     bestx = None
@@ -188,6 +189,7 @@ def qcqp_admm(self, use_sdp=True, num_samples=100,
 
         zlhs = 2*(prob.f0.P + rho*prob.m*sp.identity(prob.n))
         last_z = None
+        logging.info("Starting phase 2, rho %.3f", rho)
         for t in range(num_iters):
             rhs = 2*rho*(sum(xs)-sum(us)) - prob.f0.qarray
             z = SLA.spsolve(zlhs.tocsr(), rhs)

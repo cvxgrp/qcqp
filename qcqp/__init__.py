@@ -18,3 +18,5 @@ along with CVXPY.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 from . import problem, utilities
+from qcqp import QCQPWrapper
+from settings import COORD_DESCENT, ADMM, DCCP

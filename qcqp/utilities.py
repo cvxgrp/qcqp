@@ -123,6 +123,15 @@ class QCQP:
         return self.fs[i]
     def violations(self, x): # list of constraint violations
         return [f.violation(x) for f in self.fs]
+    def better(self, x1, x2, tol=1e-6): # returns the better point
+        v1 = max(self.violations(x1))
+        v2 = max(self.violations(x2))
+        f1 = self.f0.eval(x1)
+        f2 = self.f0.eval(x2)
+        if v1 < v2 - tol: return x1
+        if v2 < v1 - tol: return x2
+        if f1 < f2: return x1
+        return x2
 
 # TODO: optimize repeated calculations (cache factors, etc.)
 def onecons_qcqp(z, f, tol=1e-6):
