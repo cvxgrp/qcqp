@@ -117,7 +117,7 @@ class OneVarQuadraticFunction(QuadraticFunction):
             return r
         return x*(self.P*x + self.q) + self.r
 
-class QCQP:
+class QCQPForm:
     def __init__(self, f0, fs):
         assert all([f.relop is not None for f in fs])
         self.f0 = f0

@@ -1,7 +1,13 @@
 QCQP
 ====
 
-QCQP is a package for modeling and solving quadratically constrained quadratic programs (QCQPs) that are not necessarily convex, using heuristics and relaxations. The methods are discussed in [our associated paper](http://stanford.edu/class/ee364b/lectures/relaxations.pdf).
+QCQP is a package for modeling and solving quadratically constrained quadratic programs (QCQPs) that are not necessarily convex, using heuristics and relaxations.
+Our heuristics are based on the *Suggest-and-Improve* framework:
+* *Suggest* method finds a candidate point for a local method.
+* *Improve* method takes a point from the *Suggest* method and performs a local search to find a better point.
+The notion of better points is defined by the maximum violation of a point and the objective value.
+See our associated paper (to be posted online) for more information on the *Suggest-and-Improve* framework.
+For the older version of the paper discussing the semidefinite relaxation (SDR) and randomized algorithms, see [here](http://stanford.edu/class/ee364b/lectures/relaxations.pdf).
 
 QCQP is built on top of [CVXPY](http://www.cvxpy.org/), a domain-specific language for convex optimization embedded in Python.
 
@@ -16,26 +22,31 @@ Example
 -------
 The following code uses semidefinite programming (SDP) relaxation to get an upper bound on a random instance of the maximum cut problem.
 ```
-n = 20
-numpy.random.seed(1)
+from numpy.random import randn
+import cvxpy as cvx
+from qcqp import *
 
-# Make adjacency matrix.
-W = numpy.random.binomial(1, 0.2, size=(n, n))
-W = numpy.asmatrix(W)
+n, m = 10, 15
+A = randn(m, n)
+b = randn(m, 1)
 
 # Form a nonconvex problem.
 x = cvx.Variable(n)
-obj = 0.25*(cvx.sum_entries(W) - cvx.quad_form(x, W))
+obj = cvx.sum_squares(A*x - b)
 cons = [cvx.square(x) == 1]
-prob = cvx.Problem(cvx.Maximize(obj), cons)
+prob = cvx.Problem(cvx.Minimize(obj), cons)
 
-# Solve the SDP relaxation.
-ub = prob.solve(method='sdp-relax', solver=cvx.MOSEK)
-print ('Upper bound: %.3f' % ub)
+# Create a QCQP handler.
+qcqp = QCQP(prob)
 
-# Attempt to get a feasible solution.
-bestf = prob.solve(method='qcqp-admm')
-print (bestf, x.value)
+# Solve the SDP relaxation and get a starting point to a local method
+qcqp.suggest(sdp=True, solver=cvx.MOSEK)
+print("SDP-based lower bound: %.3f" % qcqp.sdp_bound)
+
+# Attempt to improve the starting point given by the suggest method
+f_cd, v_cd = qcqp.improve(COORD_DESCENT)
+print("Coordinate descent: objective %.3f, violation %.3f" % (f_cd, v_cd))
+print(x.value)
 ```
 
 Quadratic expressions
@@ -53,8 +64,17 @@ The quadraticity of an expression ``e`` can be tested using ``e.is_quadratic()``
 
 Constructing and solving problems
 ---------------------------------
-In order to use the SDP relaxation heuristic, the problem must have a quadratic objective function and quadratic constraints, using standard CVXPY syntax. Below is a list of available solve methods for QCQPs:
-* ``problem.solve(method="sdp-relax")`` solves the SDP relaxation of the problem and returns the SDP lower bound (or an upper bound in the case of maximization problem).
-* ``problem.solve(method="qcqp-admm")`` attempts to find a feasible solution via consensus [alternating directions method of multipliers](http://stanford.edu/~boyd/admm.html) (ADMM).
-* ``problem.solve(method="qcqp-dccp")`` automatically splits indefinite quadratic functions to convex and concave parts, then invokes the [DCCP](https://github.com/cvxgrp/dccp) package to find a feasible solution.
-* ``problem.solve(method="coord-descent")`` performs a two-stage coordinate descent algorithm on random starting points. The first stage tries to find a feasible point, and the second stage tries to optimize the objective function over the set of feasible points.
+QCQPs must be represented using the standard CVXPY syntax.
+In order for the problem to be accepted, the problem must have a quadratic objective function and quadratic constraints.
+To apply the Suggest and Improve methods on a QCQP, the corresponding CVXPY problem object must be passed to the QCQP constructor first. For example, if ``problem`` is a CVXPY problem object describing a QCQP, then the following code checks the validity and prepares the *Suggest* and *Improve* methods:
+```
+qcqp = QCQP(problem)
+```
+Currently two *Suggest* methods are available for QCQPs:
+* ``qcqp.suggest()`` fills the values of the variables using independent and identically distributed Gaussian random variables.
+* ``qcqp.suggest(sdp=True)`` fills the values of the variables drawn from an optimal probability distribution given by the semidefinite relaxation. Once the *Suggest* method is executed with the ``sdp`` flag, a lower bound (or an upper bound, in the case of a maximization problem) on the optimal value is accessible via ``qcqp.sdp_bound``.
+Below is a list of available solve methods for QCQPs:
+* ``qcqp.improve(ADMM)`` attempts to improve the given point via consensus [alternating directions method of multipliers](http://stanford.edu/~boyd/admm.html) (ADMM). An optional parameter ``rho`` can be specified.
+* ``qcqp.improve(DCCP)`` automatically splits indefinite quadratic functions to convex and concave parts, then invokes the [DCCP](https://github.com/cvxgrp/dccp) package, using the given point as a starting point. An optional parameter ``tau`` can be specified.
+* ``qcqp.improve(COORD_DESCENT)`` performs a two-stage coordinate descent algorithm. The first stage tries to find a feasible point. If a feasible point is found, then the second stage tries to optimize the objective function over the set of feasible points.
+Both ``improve()`` and ``suggest()`` methods return a pair ``(f, v)``, where ``f`` represents the current objective value, and ``v`` represents the maximum constraint violation of the current point.

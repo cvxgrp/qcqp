@@ -13,7 +13,7 @@
 
 import numpy as np
 import cvxpy as cvx
-import qcqp
+from qcqp import *
 
 # n, m, l: 100, 30, 10
 n = 50
@@ -41,21 +41,20 @@ cons = [
     cvx.square(C*x) + cvx.square(D*x) <= eta
 ]
 prob = cvx.Problem(obj, cons)
+qcqp = QCQP(prob)
 
-def violation(x):
-    v1 = tau - (np.square(A*x) + np.square(B*x))
-    v2 = (np.square(C*x) + np.square(D*x)) - eta
-    return max(np.max(v1), np.max(v2), 0)
+# sample from the SDP solution
+qcqp.suggest(sdp=True, solver=cvx.MOSEK)
+print("SDP-based lower bound: %.3f" % qcqp.sdp_bound)
 
-# SDP-based lower bound
-lb = prob.solve(method='sdp-relax', solver=cvx.MOSEK)
-print ('Lower bound: %.3f' % lb)
+f_cd, v_cd = qcqp.improve(COORD_DESCENT)
+print("Coordinate descent: objective %.3f, violation %.3f" % (f_cd, v_cd))
 
-# Upper bounds
-print ('(objective, maximum violation):')
-f_admm = prob.solve(method='qcqp-admm', use_sdp=False, num_samples=10, rho=np.sqrt(m+l), num_iters=1000, tol=5e-2)
-print ('  Nonconvex ADMM: (%.3f, %.3f)' % (f_admm, violation(x.value)))
-f_dccp = prob.solve(method='qcqp-dccp', use_sdp=False, num_samples=10)
-print ('  Convex-concave programming: (%.3f, %.3f)' % (f_dccp, violation(x.value)))
-f_cd = prob.solve(method='coord-descent', use_sdp=False, num_samples=10)
-print ('  Coordinate descent: (%.3f, %.3f)' % (f_cd, violation(x.value)))
+# SDP solution is cached and not solved again
+qcqp.suggest(sdp=True)
+f_dccp, v_dccp = qcqp.improve(DCCP)
+print("Penalty CCP: objective %.3f, violation %.3f" % (f_dccp, v_dccp))
+
+qcqp.suggest(sdp=True)
+f_admm, v_admm = qcqp.improve(ADMM, rho=np.sqrt(m+l))
+print("Nonconvex ADMM: objective %.3f, violation %.3f" % (f_admm, v_admm))

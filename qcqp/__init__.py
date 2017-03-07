@@ -22,6 +22,5 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 
-from . import problem, utilities
-from qcqp import QCQPWrapper
+from qcqp import QCQP
 from settings import COORD_DESCENT, ADMM, DCCP

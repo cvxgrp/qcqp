@@ -74,7 +74,7 @@ def get_qcqp_form(prob):
         for i in range(sz):
             fs.append(QuadraticFunction((Pc[i]+Pc[i].T)/2., qc[i, :].T.tocsc(), rc[i], constr.OP_NAME))
 
-    return QCQP(f0, fs)
+    return QCQPForm(f0, fs)
 
 def assign_vars(xs, vals):
     if vals is None:
@@ -205,7 +205,7 @@ def coord_descent(x, prob, *args, **kwargs):
     return x
 
 
-def admm_phase1(prob, x0, tol=1e-4, num_iters=100):
+def admm_phase1(prob, x0, tol=1e-4, num_iters=1000):
     z = np.copy(x0)
     xs = [np.copy(x0) for i in range(prob.m)]
     us = [np.zeros(prob.n) for i in range(prob.m)]
@@ -223,7 +223,7 @@ def admm_phase1(prob, x0, tol=1e-4, num_iters=100):
     return z
 
 def qcqp_admm(x0, prob, *args, **kwargs):
-    num_iters = kwargs.get('num_iters', 100)
+    num_iters = kwargs.get('num_iters', 1000)
     viollim = kwargs.get('viollim', 1e4)
     tol = kwargs.get('tol', 5e-2)
     rho = kwargs.get('rho', None)
@@ -320,7 +320,7 @@ def qcqp_dccp(x0, prob, *args, **kwargs):
 
 
 
-class QCQPWrapper:
+class QCQP:
     def __init__(self, prob):
         self.prob = prob
         self.qcqp_form = get_qcqp_form(prob)
