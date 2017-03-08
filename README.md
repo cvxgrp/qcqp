@@ -22,7 +22,7 @@ To install the package from source, run ``python setup.py install`` in the sourc
 
 Example
 -------
-The following code uses semidefinite programming (SDP) relaxation to get an upper bound on a random instance of the maximum cut problem.
+The following code uses semidefinite relaxation (SDR) to get a lower bound on a random instance of the Boolean least squares problem.
 ```
 from numpy.random import randn
 import cvxpy as cvx
