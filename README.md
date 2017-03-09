@@ -1,7 +1,7 @@
 QCQP
 ====
 
-QCQP is a package for modeling and solving quadratically constrained quadratic programs (QCQPs) that are not necessarily convex, using heuristics and relaxations.
+QCQP is a package for modeling and nonconvex solving quadratically constrained quadratic programs (QCQPs) using relaxations and local search heuristics.
 Our heuristics are based on the *Suggest-and-Improve* framework:
 
 * *Suggest* method finds a candidate point for a local method.
@@ -19,10 +19,12 @@ You should first install CVXPY, following the instructions [here](http://www.cvx
 
 The simplest and recommended way of installing QCQP is to run ``pip install qcqp``.
 To install the package from source, run ``python setup.py install`` in the source directory.
+You may need to run the commands with the ``sudo`` privilege.
 
 Example
 -------
 The following code uses semidefinite relaxation (SDR) to get a lower bound on a random instance of the Boolean least squares problem.
+Then, using a candidate point generated from the SDR, it runs a coordinate descent method to attempt to find a feasible point with better objective value.
 ```
 from numpy.random import randn
 import cvxpy as cvx
@@ -53,7 +55,7 @@ print(x.value)
 
 Quadratic expressions
 ---------------------
-The quadraticity of an expression ``e`` can be tested using ``e.is_quadratic()``. Below is a list of expressions that CVXPY recognizes as a quadratic expression.
+The quadraticity of an expression ``e`` can be tested using ``e.is_quadratic()``. Below is a list of expressions that CVXPY recognizes as a quadratic expression. Refer to the [CVXPY documentation](http://www.cvxpy.org/en/latest/tutorial/functions/index.html) for the specifications of the functions.
 * Any constant or affine expression
 * Any affine transformation applied to a quadratic expression, e.g., ``(quadratic) + (quadratic)`` or ``(constant) * (quadratic)``
 * ``(affine) * (affine)``
@@ -67,8 +69,8 @@ The quadraticity of an expression ``e`` can be tested using ``e.is_quadratic()``
 Constructing and solving problems
 ---------------------------------
 QCQPs must be represented using the standard CVXPY syntax.
-In order for the problem to be accepted, the problem must have a quadratic objective function and quadratic constraints.
-To apply the Suggest and Improve methods on a QCQP, the corresponding CVXPY problem object must be passed to the QCQP constructor first. For example, if ``problem`` is a CVXPY problem object describing a QCQP, then the following code checks the validity and prepares the *Suggest* and *Improve* methods:
+In order for the problem to be accepted by ``QCQP``, the problem must have a quadratic objective function and quadratic constraints.
+To apply the *Suggest* and *Improve* methods on a QCQP, the corresponding CVXPY problem object must be passed to the QCQP constructor first. For example, if ``problem`` is a CVXPY problem object describing a QCQP, then the following code checks the validity and prepares the *Suggest* and *Improve* methods:
 ```
 qcqp = QCQP(problem)
 ```
