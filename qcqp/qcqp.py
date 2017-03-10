@@ -35,6 +35,34 @@ import settings as s
 
 logging.basicConfig(filename='qcqp.log', filemode='w', level=logging.INFO)
 
+def solve_spectral(prob, *args, **kwargs):
+    """Solve the spectral relaxation with lambda = 1.
+    """
+
+    # TODO: do this efficiently without SDP lifting
+
+    # lifted variables and semidefinite constraint
+    X = cvx.Semidef(prob.n + 1)
+
+    W = prob.f0.homogeneous_form()
+    rel_obj = cvx.Minimize(cvx.sum_entries(cvx.mul_elemwise(W, X)))
+    rel_constr = [X[-1, -1] == 1]
+
+    sum_lhs = 0
+
+    W = sum([f.homogeneous_form() for f in prob.fs if f.relop == '<='])
+
+    rel_prob = cvx.Problem(rel_obj,
+        [cvx.sum_entries(cvx.mul_elemwise(W, X)) <= 0]
+    )
+    rel_prob.solve(*args, **kwargs)
+
+    if rel_prob.status not in [cvx.OPTIMAL, cvx.OPTIMAL_INACCURATE]:
+        raise Exception("Relaxation problem status: %s" % rel_prob.status)
+
+    (w, v) = LA.eig(x.value)
+    return v[:, np.argmax(w)].flatten(), rel_prob.value
+
 def solve_sdr(prob, *args, **kwargs):
     """Solve the SDP relaxation.
     """
@@ -227,7 +255,7 @@ def improve_admm(x0, prob, *args, **kwargs):
             logging.error("rho parameter is too small, z-update not convex.")
             logging.error("Minimum possible value of rho: %.3f\n", -lmb_min/prob.m)
             logging.error("Given value of rho: %.3f\n", rho)
-            raise
+            raise Exception("rho parameter is too small, need at least %.3f." % rho)
 
     # TODO: find a reasonable auto parameter
     if rho is None:
@@ -251,8 +279,7 @@ def improve_dccp(x0, prob, *args, **kwargs):
     try:
         import dccp
     except ImportError:
-        logging.error("DCCP package is not installed; qcqp-dccp method is unavailable.")
-        raise
+        raise Exception("DCCP package is not installed.")
 
     use_eigen_split = kwargs.get('use_eigen_split', False)
     tau = kwargs.get('tau', 0.005)
@@ -290,31 +317,35 @@ class QCQP:
         self.prob = prob
         self.qcqp_form = get_qcqp_form(prob)
         self.n = self.qcqp_form.n
-        self.sdp_sol = None
-        self.sdp_bound = None
+        self.spectral_bound = None
+        self.sdr_sol = None
+        self.sdr_bound = None
         self.maximize_flag = (prob.objective.NAME == "maximize")
 
-    def suggest(self, sdp=False, eps=1e-8, *args, **kwargs):
-        if sdp and self.sdp_sol is None:
-            self.sdp_sol, self.sdp_bound = solve_sdr(self.qcqp_form, *args, **kwargs)
-            if self.maximize_flag:
-                self.sdp_bound = -self.sdp_bound
-            self.mu = np.asarray(self.sdp_sol[:-1, -1]).flatten()
-            self.Sigma = self.sdp_sol[:-1, :-1] - self.mu*self.mu.T + eps*sp.identity(self.n)
-        if sdp:
-            x = np.random.multivariate_normal(self.mu, self.Sigma, 1)
-        else:
-            x = np.random.randn(1, self.n)
-        x = x[0, :].flatten()
+    def suggest(self, method=s.RANDOM, eps=1e-8, *args, **kwargs):
+        if method not in s.suggest_methods:
+            raise Exception("Unknown suggest method: %s\n", method)
+        if method == s.RANDOM:
+            x = np.random.randn(self.n)
+        elif method == s.SPECTRAL:
+            x, self.spectral_bound = solve_spectral(self.qcqp_form, *args, **kwargs)
+        elif method == s.SDR:
+            if self.sdr_sol is None:
+                self.sdr_sol, self.sdr_bound = solve_sdr(self.qcqp_form, *args, **kwargs)
+                if self.maximize_flag:
+                    self.sdr_bound = -self.sdr_bound
+                self.mu = np.asarray(self.sdr_sol[:-1, -1]).flatten()
+                self.Sigma = self.sdr_sol[:-1, :-1] - self.mu*self.mu.T + eps*sp.identity(self.n)
+            x = np.random.multivariate_normal(self.mu, self.Sigma)
+
         assign_vars(self.prob.variables(), x)
         f0 = self.qcqp_form.f0.eval(x)
         if self.maximize_flag: f0 = -f0
         return (f0, max(self.qcqp_form.violations(x)))
 
     def improve(self, method, *args, **kwargs):
-        if method not in s.available_methods:
-            logging.error("Unknown method: %s\n", method)
-            raise
+        if method not in s.improve_methods:
+            raise Exception("Unknown improve method: %s\n", method)
         for x in self.prob.variables():
             if x.value is None:
                 self.suggest()
@@ -326,6 +357,7 @@ class QCQP:
             x = improve_admm(x0, self.qcqp_form, args, kwargs)
         elif method == s.DCCP:
             x = improve_dccp(x0, self.qcqp_form, args, kwargs)
+
         assign_vars(self.prob.variables(), x)
         f0 = self.qcqp_form.f0.eval(x)
         if self.maximize_flag: f0 = -f0

@@ -23,4 +23,5 @@ SOFTWARE.
 """
 
 from qcqp import QCQP
+from settings import RANDOM, SPECTRAL, SDR
 from settings import COORD_DESCENT, ADMM, DCCP

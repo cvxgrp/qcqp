@@ -21,18 +21,18 @@ cons = [cvx.square(x) == 1]
 prob = cvx.Problem(cvx.Maximize(obj), cons)
 qcqp = QCQP(prob)
 
-# sample from the SDP solution
-qcqp.suggest(sdp=True, solver=cvx.MOSEK)
-print("SDP-based upper bound: %.3f" % qcqp.sdp_bound)
+# sample from the semidefinite relaxation
+qcqp.suggest(SDR, solver=cvx.MOSEK)
+print("SDR-based upper bound: %.3f" % qcqp.sdr_bound)
 
 f_cd, v_cd = qcqp.improve(COORD_DESCENT)
 print("Coordinate descent: objective %.3f, violation %.3f" % (f_cd, v_cd))
 
-# SDP solution is cached and not solved again
-qcqp.suggest(sdp=True)
+# SDR solution is cached and not solved again
+qcqp.suggest(SDR)
 f_dccp, v_dccp = qcqp.improve(DCCP, tau=1)
 print("Penalty CCP: objective %.3f, violation %.3f" % (f_dccp, v_dccp))
 
-qcqp.suggest(sdp=True)
+qcqp.suggest(SDR)
 f_admm, v_admm = qcqp.improve(ADMM)
 print("Nonconvex ADMM: objective %.3f, violation %.3f" % (f_admm, v_admm))

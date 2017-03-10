@@ -42,23 +42,23 @@ cons = [
 prob = cvx.Problem(obj, cons)
 qcqp = QCQP(prob)
 
-# sample from the SDP solution
-qcqp.suggest(sdp=True, solver=cvx.MOSEK)
-print("SDP-based lower bound: %.3f" % qcqp.sdp_bound)
+# sample from the semidefinite relaxation
+qcqp.suggest(SDR, solver=cvx.MOSEK)
+print("SDR-based lower bound: %.3f" % qcqp.sdr_bound)
 
 # f_cd, v_cd = qcqp.improve(COORD_DESCENT)
 # print("Coordinate descent: objective %.3f, violation %.3f" % (f_cd, v_cd))
 # f_cd, v_cd = qcqp.improve(ADMM, rho=np.sqrt(m+l), phase1=False)
 # print("Coordinate descent: objective %.3f, violation %.3f" % (f_cd, v_cd))
 
-# # SDP solution is cached and not solved again
-# qcqp.suggest(sdp=True)
+# # SDR solution is cached and not solved again
+# qcqp.suggest(SDR)
 f_dccp, v_dccp = qcqp.improve(DCCP)
 print("Penalty CCP: objective %.3f, violation %.3f" % (f_dccp, v_dccp))
 f_dccp, v_dccp = qcqp.improve(COORD_DESCENT, phase1=False)
 print("Penalty CCP: objective %.3f, violation %.3f" % (f_dccp, v_dccp))
 
-qcqp.suggest(sdp=True)
+qcqp.suggest(SDR)
 f_admm, v_admm = qcqp.improve(COORD_DESCENT)
 print("Nonconvex ADMM: objective %.3f, violation %.3f" % (f_admm, v_admm))
 f_admm, v_admm = qcqp.improve(ADMM, rho=np.sqrt(m+l))

@@ -44,7 +44,7 @@ prob = cvx.Problem(cvx.Minimize(obj), cons)
 qcqp = QCQP(prob)
 
 # Solve the SDP relaxation and get a starting point to a local method
-qcqp.suggest(sdp=True, solver=cvx.MOSEK)
+qcqp.suggest(SDR, solver=cvx.MOSEK)
 print("SDP-based lower bound: %.3f" % qcqp.sdp_bound)
 
 # Attempt to improve the starting point given by the suggest method
@@ -77,8 +77,10 @@ qcqp = QCQP(problem)
 
 Currently two *Suggest* methods are available for QCQPs:
 
-* ``qcqp.suggest()`` fills the values of the variables using independent and identically distributed Gaussian random variables.
-* ``qcqp.suggest(sdp=True)`` fills the values of the variables drawn from an optimal probability distribution given by the semidefinite relaxation. Once the *Suggest* method is executed with the ``sdp`` flag, a lower bound (or an upper bound, in the case of a maximization problem) on the optimal value is accessible via ``qcqp.sdp_bound``.
+* ``qcqp.suggest()`` or ``qcqp.suggest(RANDOM)`` fills the values of the variables using independent and identically distributed Gaussian random variables.
+* ``qcqp.suggest(SPECTRAL)`` adds all the constraints to a single (possibly nonconvex) constraint, and solves the resulting QCQP with that one constraint. The solution of the relaxation is then stored to the values of the variables. *The performance of this method is yet to be optimized.*
+* ``qcqp.suggest(SDR)`` fills the values of the variables drawn from an optimal probability distribution given by the semidefinite relaxation.
+Then, a lower bound (or an upper bound, in the case of a maximization problem) on the optimal value is saved to ``qcqp.sdr_bound``.
 
 Below is a list of available solve methods for QCQPs:
 
@@ -87,3 +89,4 @@ Below is a list of available solve methods for QCQPs:
 * ``qcqp.improve(COORD_DESCENT)`` performs a two-stage coordinate descent algorithm. The first stage tries to find a feasible point. If a feasible point is found, then the second stage tries to optimize the objective function over the set of feasible points.
 
 Both ``improve()`` and ``suggest()`` methods return a pair ``(f, v)``, where ``f`` represents the current objective value, and ``v`` represents the maximum constraint violation of the current point.
+

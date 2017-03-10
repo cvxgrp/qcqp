@@ -15,23 +15,23 @@ cons = [cvx.square(x) == 1]
 prob = cvx.Problem(cvx.Minimize(obj), cons)
 qcqp = QCQP(prob)
 
-# sample from the SDP solution
-qcqp.suggest(sdp=True, solver=cvx.MOSEK)
-print("SDP-based lower bound: %.3f" % qcqp.sdp_bound)
+# sample from the semidefinite relaxation
+qcqp.suggest(SDR, solver=cvx.MOSEK)
+print("SDR lower bound: %.3f" % qcqp.sdr_bound)
 
 f_cd, v_cd = qcqp.improve(COORD_DESCENT)
 x_cd = x.value
 print("Coordinate descent: objective %.3f, violation %.3f" % (f_cd, v_cd))
 
-# SDP solution is cached and not solved again
-qcqp.suggest(sdp=True)
+# SDR solution is cached and not solved again
+qcqp.suggest(SDR)
 f_dccp, v_dccp = qcqp.improve(DCCP)
 print("Penalty CCP: objective %.3f, violation %.3f" % (f_dccp, v_dccp))
 f_dccp, v_dccp = qcqp.improve(COORD_DESCENT, phase1=False)
 x_dccp = x.value
 print("Penalty CCP: objective %.3f, violation %.3f" % (f_dccp, v_dccp))
 
-qcqp.suggest(sdp=True)
+qcqp.suggest(SDR)
 f_admm, v_admm = qcqp.improve(COORD_DESCENT)
 f_admm, v_admm = qcqp.improve(ADMM, phase1=False)
 x_admm = x.value

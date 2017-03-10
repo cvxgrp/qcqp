@@ -22,7 +22,15 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 
+RANDOM = "random"
+SDR = "sdr"
+SPECTRAL = "spectral"
+
+suggest_methods = [RANDOM, SDR, SPECTRAL]
+
 COORD_DESCENT = "coord-descent"
 ADMM = "admm"
 DCCP = "dccp"
-available_methods = [COORD_DESCENT, ADMM, DCCP]
+
+improve_methods = [COORD_DESCENT, ADMM, DCCP]
+
