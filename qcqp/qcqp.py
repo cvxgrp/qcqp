@@ -29,74 +29,13 @@ import cvxpy.lin_ops.lin_utils as lu
 import scipy.sparse as sp
 from numpy import linalg as LA
 import scipy.sparse.linalg as SLA
-from cvxpy.utilities import QuadCoeffExtractor
 from utilities import *
 import logging
 import settings as s
 
 logging.basicConfig(filename='qcqp.log', filemode='w', level=logging.INFO)
 
-def get_id_map(xs):
-    id_map = {}
-    N = 0
-    for x in xs:
-        id_map[x.id] = N
-        N += x.size[0]*x.size[1]
-    return id_map, N
-
-
-def get_qcqp_form(prob):
-    """Returns the problem metadata in QCQP class
-    """
-    # Check quadraticity
-    if not prob.objective.args[0].is_quadratic():
-        raise Exception("Objective is not quadratic.")
-    if not all([constr._expr.is_quadratic() for constr in prob.constraints]):
-        raise Exception("Not all constraints are quadratic.")
-    if prob.is_dcp():
-        logging.warning("Problem is already convex; specifying solve method is unnecessary.")
-
-    extractor = QuadCoeffExtractor(*get_id_map(prob.variables()))
-
-    P0, q0, r0 = extractor.get_coeffs(prob.objective.args[0])
-    # unpacking values
-    P0, q0, r0 = (P0[0]+P0[0].T)/2., q0.T.tocsc(), r0[0]
-
-    if prob.objective.NAME == "maximize":
-        P0, q0, r0 = -P0, -q0, -r0
-
-    f0 = QuadraticFunction(P0, q0, r0)
-
-    fs = []
-    for constr in prob.constraints:
-        sz = constr._expr.size[0]*constr._expr.size[1]
-        Pc, qc, rc = extractor.get_coeffs(constr._expr)
-        for i in range(sz):
-            fs.append(QuadraticFunction((Pc[i]+Pc[i].T)/2., qc[i, :].T.tocsc(), rc[i], constr.OP_NAME))
-
-    return QCQPForm(f0, fs)
-
-def assign_vars(xs, vals):
-    if vals is None:
-        for x in xs:
-            size = x.size[0]*x.size[1]
-            x.value = np.full(x.size, np.nan)
-    else:
-        ind = 0
-        for x in xs:
-            size = x.size[0]*x.size[1]
-            x.value = np.reshape(vals[ind:ind+size], x.size, order='F')
-            ind += size
-
-def flatten_vars(xs, n):
-    ret = np.empty(n)
-    ind = 0
-    for x in xs:
-        size = x.size[0]*x.size[1]
-        ret[ind:ind+size] = np.ravel(x.value, order='F')
-    return ret
-
-def solve_relaxation(prob, *args, **kwargs):
+def solve_sdr(prob, *args, **kwargs):
     """Solve the SDP relaxation.
     """
 
@@ -124,34 +63,30 @@ def solve_relaxation(prob, *args, **kwargs):
     return X.value, rel_prob.value
 
 
-# TODO: rewrite the dirty stuff below
-def coord_descent(x, prob, *args, **kwargs):
-    num_iters = kwargs.get('num_iters', 1000)
-    bsearch_tol = kwargs.get('bsearch_tol', 1e-4)
-    viol_tol = kwargs.get('viol_tol', 1e-3)
-    tol = kwargs.get('tol', 1e-4)
-
+# phase 1: optimize infeasibility
+def coord_descent_phase1(x0, prob, num_iters=1000,
+    viol_tol=1e-2, tol=1e-4):
+    logging.info("Phase 1 starts")
+    x = np.copy(x0)
     # number of iterations since last infeasibility improvement
     update_counter = 0
-    # phase 1: optimize infeasibility
     failed = False
-    logging.info("Phase 1 starts")
     # TODO: correct termination condition with tolerance
     viol_last = np.inf
-    while viol_last > viol_tol:
+    for t in range(num_iters):
+        if viol_last < viol_tol: break
         # optimize over x[i]
         for i in range(prob.n):
             obj = OneVarQuadraticFunction(0, 0, 0)
             nfs = [f.get_onevar_func(x, i) for f in prob.fs]
-            # TODO: maybe this shouldn't be here?
-            nfs = [f for f in nfs if abs(f.P) > tol or abs(f.q) > tol]
+            nfs = [f for f in nfs if f.P != 0 or f.q != 0]
             viol = max([f.violation(x[i]) for f in nfs])
             logging.debug("Current violation in x[%d]: %.3f", i, viol)
             logging.debug("Current point: %s", x)
             new_xi = x[i]
             new_viol = viol
-            ss, es = 0, viol
-            while es - ss > bsearch_tol:
+            ss, es = -tol, viol - viol_tol
+            while es - ss > tol:
                 s = (ss + es) / 2
                 xi = onevar_qcqp(obj, nfs, s)
                 if xi is None:
@@ -172,16 +107,20 @@ def coord_descent(x, prob, *args, **kwargs):
         #if failed: break
         viol = max(prob.violations(x))
         logging.info("Maximum violation: %.6f -> %.6f", viol_last, viol)
-        if viol_last <= viol + bsearch_tol:
-            break
+        #if viol_last <= viol + tol:
+        #    break
         viol_last = viol
 
+    return x
+
+
+# phase 2: optimize objective over feasible points
+def coord_descent_phase2(x0, prob, num_iters=1000,
+    viol_tol=1e-2, tol=1e-4):
     # TODO: find correct termination condition with tolerance
-    # phase 2: optimize objective over feasible points
-    #if failed: continue
-    if viol > viol_tol: return x
     logging.info("Phase 2 starts")
-    fval = prob.f0.eval(x)
+    x = np.copy(x0)
+    viol = max(prob.violations(x))
     update_counter = 0
     converged = False
     for t in range(num_iters):
@@ -190,8 +129,8 @@ def coord_descent(x, prob, *args, **kwargs):
             obj = prob.f0.get_onevar_func(x, i)
             nfs = [f.get_onevar_func(x, i) for f in prob.fs]
             # TODO: maybe this shouldn't be here?
-            nfs = [f for f in nfs if abs(f.P) > tol or abs(f.q) > tol]
-            new_xi = onevar_qcqp(obj, nfs, tol)
+            nfs = [f for f in nfs if f.P != 0 or f.q != 0]
+            new_xi = onevar_qcqp(obj, nfs, viol)
             if new_xi is not None and np.abs(new_xi - x[i]) > tol:
                 x[i] = new_xi
                 update_counter = 0
@@ -205,7 +144,23 @@ def coord_descent(x, prob, *args, **kwargs):
     return x
 
 
-def admm_phase1(prob, x0, tol=1e-4, num_iters=1000):
+def improve_coord_descent(x, prob, *args, **kwargs):
+    num_iters = kwargs.get('num_iters', 1000)
+    viol_tol = kwargs.get('viol_tol', 1e-2)
+    tol = kwargs.get('tol', 1e-4)
+    phase1 = kwargs.get('phase1', True)
+
+    if phase1:
+        x = coord_descent_phase1(x, prob, num_iters, viol_tol, tol)
+    if max(prob.violations(x)) < viol_tol:
+        x = coord_descent_phase2(x, prob, num_iters, viol_tol, tol)
+
+    return x
+
+
+def admm_phase1(x0, prob, tol=1e-2, num_iters=1000):
+    logging.info("Starting ADMM phase 1")
+
     z = np.copy(x0)
     xs = [np.copy(x0) for i in range(prob.m)]
     us = [np.zeros(prob.n) for i in range(prob.m)]
@@ -222,41 +177,18 @@ def admm_phase1(prob, x0, tol=1e-4, num_iters=1000):
 
     return z
 
-def qcqp_admm(x0, prob, *args, **kwargs):
-    num_iters = kwargs.get('num_iters', 1000)
-    viollim = kwargs.get('viollim', 1e4)
-    tol = kwargs.get('tol', 5e-2)
-    rho = kwargs.get('rho', None)
-    # TODO: find a reasonable auto parameter
-    if rho is not None:
-        lmb0, P0Q = map(np.asmatrix, LA.eigh(prob.f0.P.todense()))
-        lmb_min = np.min(lmb0)
-        if lmb_min + prob.m*rho < 0:
-            logging.error("rho parameter is too small, z-update not convex.")
-            logging.error("Minimum possible value of rho: %.3f\n", -lmb_min/prob.m)
-            logging.error("Given value of rho: %.3f\n", rho)
-            raise
 
-    if rho is None:
-        lmb0, P0Q = map(np.asmatrix, LA.eigh(prob.f0.P.todense()))
-        lmb_min = np.min(lmb0)
-        lmb_max = np.max(lmb0)
-        if lmb_min < 0: rho = 2.*(1.-lmb_min)/prob.m
-        else: rho = 1./prob.m
-        rho *= 50.
-        logging.warning("Automatically setting rho to %.3f", rho)
+def admm_phase2(x0, prob, rho, tol=1e-2, num_iters=1000, viol_lim=1e4):
+    logging.info("Starting ADMM phase 2 with rho %.3f", rho)
 
-    logging.info("Starting phase 1")
-    x0 = prob.better(x0, admm_phase1(prob, x0, tol, num_iters))
     bestx = np.copy(x0)
 
-    z = x0
+    z = np.copy(x0)
     xs = [np.copy(x0) for i in range(prob.m)]
     us = [np.zeros(prob.n) for i in range(prob.m)]
 
     zlhs = 2*(prob.f0.P + rho*prob.m*sp.identity(prob.n))
     last_z = None
-    logging.info("Starting phase 2, rho %.3f", rho)
     for t in range(num_iters):
         rhs = 2*rho*(sum(xs)-sum(us)) - prob.f0.qarray
         z = SLA.spsolve(zlhs.tocsr(), rhs)
@@ -275,13 +207,47 @@ def qcqp_admm(x0, prob, *args, **kwargs):
         maxviol = max(prob.violations(z))
         logging.info("Iteration %d, violation %.3f", t, maxviol)
 
-        if maxviol > viollim: break
+        if maxviol > viol_lim: break
         bestx = np.copy(prob.better(z, bestx))
 
     return bestx
 
 
-def qcqp_dccp(x0, prob, *args, **kwargs):
+def improve_admm(x0, prob, *args, **kwargs):
+    num_iters = kwargs.get('num_iters', 1000)
+    viol_lim = kwargs.get('viol_lim', 1e4)
+    tol = kwargs.get('tol', 1e-2)
+    rho = kwargs.get('rho', None)
+    phase1 = kwargs.get('phase1', True)
+
+    if rho is not None:
+        lmb0, P0Q = map(np.asmatrix, LA.eigh(prob.f0.P.todense()))
+        lmb_min = np.min(lmb0)
+        if lmb_min + prob.m*rho < 0:
+            logging.error("rho parameter is too small, z-update not convex.")
+            logging.error("Minimum possible value of rho: %.3f\n", -lmb_min/prob.m)
+            logging.error("Given value of rho: %.3f\n", rho)
+            raise
+
+    # TODO: find a reasonable auto parameter
+    if rho is None:
+        lmb0, P0Q = map(np.asmatrix, LA.eigh(prob.f0.P.todense()))
+        lmb_min = np.min(lmb0)
+        lmb_max = np.max(lmb0)
+        if lmb_min < 0: rho = 2.*(1.-lmb_min)/prob.m
+        else: rho = 1./prob.m
+        rho *= 50.
+        logging.warning("Automatically setting rho to %.3f", rho)
+
+    if phase1:
+        x1 = prob.better(x0, admm_phase1(x0, prob, tol, num_iters))
+    else:
+        x1 = x0
+    x2 = prob.better(x1, admm_phase2(x1, prob, rho, tol, num_iters, viol_lim))
+    return x2
+
+
+def improve_dccp(x0, prob, *args, **kwargs):
     try:
         import dccp
     except ImportError:
@@ -319,7 +285,6 @@ def qcqp_dccp(x0, prob, *args, **kwargs):
     return bestx
 
 
-
 class QCQP:
     def __init__(self, prob):
         self.prob = prob
@@ -331,7 +296,7 @@ class QCQP:
 
     def suggest(self, sdp=False, eps=1e-8, *args, **kwargs):
         if sdp and self.sdp_sol is None:
-            self.sdp_sol, self.sdp_bound = solve_relaxation(self.qcqp_form, *args, **kwargs)
+            self.sdp_sol, self.sdp_bound = solve_sdr(self.qcqp_form, *args, **kwargs)
             if self.maximize_flag:
                 self.sdp_bound = -self.sdp_bound
             self.mu = np.asarray(self.sdp_sol[:-1, -1]).flatten()
@@ -356,11 +321,11 @@ class QCQP:
                 break
         x0 = flatten_vars(self.prob.variables(), self.n)
         if method == s.COORD_DESCENT:
-            x = coord_descent(x0, self.qcqp_form, args, kwargs)
+            x = improve_coord_descent(x0, self.qcqp_form, args, kwargs)
         elif method == s.ADMM:
-            x = qcqp_admm(x0, self.qcqp_form, args, kwargs)
+            x = improve_admm(x0, self.qcqp_form, args, kwargs)
         elif method == s.DCCP:
-            x = qcqp_dccp(x0, self.qcqp_form, args, kwargs)
+            x = improve_dccp(x0, self.qcqp_form, args, kwargs)
         assign_vars(self.prob.variables(), x)
         f0 = self.qcqp_form.f0.eval(x)
         if self.maximize_flag: f0 = -f0

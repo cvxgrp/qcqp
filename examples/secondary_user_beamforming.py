@@ -15,10 +15,9 @@ import numpy as np
 import cvxpy as cvx
 from qcqp import *
 
-# n, m, l: 100, 30, 10
-n = 50
-m = 10
-l = 5
+n = 20
+m = 5
+l = 2
 
 tau = 20
 eta = 2
@@ -47,14 +46,22 @@ qcqp = QCQP(prob)
 qcqp.suggest(sdp=True, solver=cvx.MOSEK)
 print("SDP-based lower bound: %.3f" % qcqp.sdp_bound)
 
-f_cd, v_cd = qcqp.improve(COORD_DESCENT)
-print("Coordinate descent: objective %.3f, violation %.3f" % (f_cd, v_cd))
+# f_cd, v_cd = qcqp.improve(COORD_DESCENT)
+# print("Coordinate descent: objective %.3f, violation %.3f" % (f_cd, v_cd))
+# f_cd, v_cd = qcqp.improve(ADMM, rho=np.sqrt(m+l), phase1=False)
+# print("Coordinate descent: objective %.3f, violation %.3f" % (f_cd, v_cd))
 
-# SDP solution is cached and not solved again
-qcqp.suggest(sdp=True)
+# # SDP solution is cached and not solved again
+# qcqp.suggest(sdp=True)
 f_dccp, v_dccp = qcqp.improve(DCCP)
+print("Penalty CCP: objective %.3f, violation %.3f" % (f_dccp, v_dccp))
+f_dccp, v_dccp = qcqp.improve(COORD_DESCENT, phase1=False)
 print("Penalty CCP: objective %.3f, violation %.3f" % (f_dccp, v_dccp))
 
 qcqp.suggest(sdp=True)
+f_admm, v_admm = qcqp.improve(COORD_DESCENT)
+print("Nonconvex ADMM: objective %.3f, violation %.3f" % (f_admm, v_admm))
 f_admm, v_admm = qcqp.improve(ADMM, rho=np.sqrt(m+l))
+print("Nonconvex ADMM: objective %.3f, violation %.3f" % (f_admm, v_admm))
+f_admm, v_admm = qcqp.improve(COORD_DESCENT, phase1=False)
 print("Nonconvex ADMM: objective %.3f, violation %.3f" % (f_admm, v_admm))

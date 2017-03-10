@@ -26,6 +26,7 @@ from __future__ import division
 import numpy as np
 import scipy.sparse as sp
 import cvxpy as cvx
+from cvxpy.utilities import QuadCoeffExtractor
 from numpy import linalg as LA
 from collections import defaultdict
 from itertools import chain
@@ -128,13 +129,16 @@ class QCQPForm:
         return self.fs[i]
     def violations(self, x): # list of constraint violations
         return [f.violation(x) for f in self.fs]
-    def better(self, x1, x2, tol=1e-6): # returns the better point
-        v1 = max(self.violations(x1))
-        v2 = max(self.violations(x2))
+    def better(self, x1, x2, tol=1e-4):
+        # returns the better point
+        # bucketize the violations in order to avoid chains of
+        # "better" points ultimately preferring high infeasibility
+        v1 = int(max(self.violations(x1))/tol)
+        v2 = int(max(self.violations(x2))/tol)
         f1 = self.f0.eval(x1)
         f2 = self.f0.eval(x2)
-        if v1 < v2 - tol: return x1
-        if v2 < v1 - tol: return x2
+        if v1 < v2: return x1
+        if v2 < v1: return x2
         if f1 < f2: return x1
         return x2
 
@@ -209,7 +213,7 @@ def get_feasible_intervals(f, s=0, tol=1e-4):
             if D >= 0:
                 rD = np.sqrt(D)
                 # note that p < 0
-                I = [(-np.inf, (q+rD)/(2*p)), ((q-rD)/(2*p), np.inf)]
+                I = [(-np.inf, (-q+rD)/(2*p)), ((-q-rD)/(2*p), np.inf)]
             else: # always feasible
                 I = [(-np.inf, np.inf)]
         else:
@@ -228,7 +232,7 @@ def get_feasible_intervals(f, s=0, tol=1e-4):
 # where the only variable is a real number x
 # The relation operator ~ can be <= or ==. In case ~ is ==,
 # the constraint means |fi(x)| <= s.
-def onevar_qcqp(f0, fs, s, tol=1e-4):
+def onevar_qcqp(f0, fs, s):
     # O(m log m) routine for finding feasible set
     Is = list(chain(*[get_feasible_intervals(f, s) for f in fs]))
     m = len(fs)
@@ -276,3 +280,63 @@ def onevar_qcqp(f0, fs, s, tol=1e-4):
         return None
     else:
         return np.random.choice(bestxs)
+
+def get_id_map(xs):
+    id_map = {}
+    N = 0
+    for x in xs:
+        id_map[x.id] = N
+        N += x.size[0]*x.size[1]
+    return id_map, N
+
+def assign_vars(xs, vals):
+    if vals is None:
+        for x in xs:
+            size = x.size[0]*x.size[1]
+            x.value = np.full(x.size, np.nan)
+    else:
+        ind = 0
+        for x in xs:
+            size = x.size[0]*x.size[1]
+            x.value = np.reshape(vals[ind:ind+size], x.size, order='F')
+            ind += size
+
+def flatten_vars(xs, n):
+    ret = np.empty(n)
+    ind = 0
+    for x in xs:
+        size = x.size[0]*x.size[1]
+        ret[ind:ind+size] = np.ravel(x.value, order='F')
+    return ret
+
+def get_qcqp_form(prob):
+    """Returns the problem metadata in QCQP class
+    """
+    # Check quadraticity
+    if not prob.objective.args[0].is_quadratic():
+        raise Exception("Objective is not quadratic.")
+    if not all([constr._expr.is_quadratic() for constr in prob.constraints]):
+        raise Exception("Not all constraints are quadratic.")
+    if prob.is_dcp():
+        logging.warning("Problem is already convex; specifying solve method is unnecessary.")
+
+    extractor = QuadCoeffExtractor(*get_id_map(prob.variables()))
+
+    P0, q0, r0 = extractor.get_coeffs(prob.objective.args[0])
+    # unpacking values
+    P0, q0, r0 = (P0[0]+P0[0].T)/2., q0.T.tocsc(), r0[0]
+
+    if prob.objective.NAME == "maximize":
+        P0, q0, r0 = -P0, -q0, -r0
+
+    f0 = QuadraticFunction(P0, q0, r0)
+
+    fs = []
+    for constr in prob.constraints:
+        sz = constr._expr.size[0]*constr._expr.size[1]
+        Pc, qc, rc = extractor.get_coeffs(constr._expr)
+        for i in range(sz):
+            fs.append(QuadraticFunction((Pc[i]+Pc[i].T)/2., qc[i, :].T.tocsc(), rc[i], constr.OP_NAME))
+
+    return QCQPForm(f0, fs)
+

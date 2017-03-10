@@ -22,17 +22,17 @@ print("SDP-based lower bound: %.3f" % qcqp.sdp_bound)
 f_cd, v_cd = qcqp.improve(COORD_DESCENT)
 x_cd = x.value
 print("Coordinate descent: objective %.3f, violation %.3f" % (f_cd, v_cd))
-print(x_cd.T)
 
 # SDP solution is cached and not solved again
 qcqp.suggest(sdp=True)
 f_dccp, v_dccp = qcqp.improve(DCCP)
+print("Penalty CCP: objective %.3f, violation %.3f" % (f_dccp, v_dccp))
+f_dccp, v_dccp = qcqp.improve(COORD_DESCENT, phase1=False)
 x_dccp = x.value
 print("Penalty CCP: objective %.3f, violation %.3f" % (f_dccp, v_dccp))
-print(x_dccp.T)
 
 qcqp.suggest(sdp=True)
-f_admm, v_admm = qcqp.improve(ADMM)
+f_admm, v_admm = qcqp.improve(COORD_DESCENT)
+f_admm, v_admm = qcqp.improve(ADMM, phase1=False)
 x_admm = x.value
-print("Nonconvex ADMM: objective %.3f, violation %.3f" % (f_admm, v_admm))
-print(x_admm.T)
+print("Coordinate descent + nonconvex ADMM: objective %.3f, violation %.3f" % (f_admm, v_admm))
