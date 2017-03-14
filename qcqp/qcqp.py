@@ -46,22 +46,25 @@ def solve_spectral(prob, *args, **kwargs):
 
     W = prob.f0.homogeneous_form()
     rel_obj = cvx.Minimize(cvx.sum_entries(cvx.mul_elemwise(W, X)))
-    rel_constr = [X[-1, -1] == 1]
 
-    sum_lhs = 0
+    W1 = sum([f.homogeneous_form() for f in prob.fs if f.relop == '<='])
+    W2 = sum([f.homogeneous_form() for f in prob.fs if f.relop == '=='])
 
-    W = sum([f.homogeneous_form() for f in prob.fs if f.relop == '<='])
-
-    rel_prob = cvx.Problem(rel_obj,
-        [cvx.sum_entries(cvx.mul_elemwise(W, X)) <= 0]
+    rel_prob = cvx.Problem(
+        rel_obj,
+        [
+            cvx.sum_entries(cvx.mul_elemwise(W1, X)) <= 0,
+            cvx.sum_entries(cvx.mul_elemwise(W2, X)) == 0,
+            X[-1, -1] == 1
+        ]
     )
     rel_prob.solve(*args, **kwargs)
 
     if rel_prob.status not in [cvx.OPTIMAL, cvx.OPTIMAL_INACCURATE]:
         raise Exception("Relaxation problem status: %s" % rel_prob.status)
 
-    (w, v) = LA.eig(x.value)
-    return v[:, np.argmax(w)].flatten(), rel_prob.value
+    (w, v) = LA.eig(X.value)
+    return np.sqrt(np.max(w))*np.asarray(v[:-1, np.argmax(w)]).flatten(), rel_prob.value
 
 def solve_sdr(prob, *args, **kwargs):
     """Solve the SDP relaxation.
@@ -329,18 +332,20 @@ class QCQP:
             x = np.random.randn(self.n)
         elif method == s.SPECTRAL:
             x, self.spectral_bound = solve_spectral(self.qcqp_form, *args, **kwargs)
+            if self.maximize_flag:
+                self.spectral_bound *= -1
         elif method == s.SDR:
             if self.sdr_sol is None:
                 self.sdr_sol, self.sdr_bound = solve_sdr(self.qcqp_form, *args, **kwargs)
                 if self.maximize_flag:
-                    self.sdr_bound = -self.sdr_bound
+                    self.sdr_bound *= -1
                 self.mu = np.asarray(self.sdr_sol[:-1, -1]).flatten()
                 self.Sigma = self.sdr_sol[:-1, :-1] - self.mu*self.mu.T + eps*sp.identity(self.n)
             x = np.random.multivariate_normal(self.mu, self.Sigma)
 
         assign_vars(self.prob.variables(), x)
         f0 = self.qcqp_form.f0.eval(x)
-        if self.maximize_flag: f0 = -f0
+        if self.maximize_flag: f0 *= -1
         return (f0, max(self.qcqp_form.violations(x)))
 
     def improve(self, method, *args, **kwargs):
@@ -360,5 +365,5 @@ class QCQP:
 
         assign_vars(self.prob.variables(), x)
         f0 = self.qcqp_form.f0.eval(x)
-        if self.maximize_flag: f0 = -f0
+        if self.maximize_flag: f0 *= -1
         return (f0, max(self.qcqp_form.violations(x)))
