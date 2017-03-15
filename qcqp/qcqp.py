@@ -197,14 +197,14 @@ def admm_phase1(x0, prob, tol=1e-2, num_iters=1000):
     us = [np.zeros(prob.n) for i in range(prob.m)]
 
     for t in range(num_iters):
+        if max(prob.violations(z)) < tol:
+            break
         z = (sum(xs)-sum(us))/prob.m
         for i in range(prob.m):
             x, u, f = xs[i], us[i], prob.fi(i)
             xs[i] = onecons_qcqp(z + u, f)
         for i in range(prob.m):
             us[i] += z - xs[i]
-        if max(prob.violations(z)) < tol:
-            break
 
     return z
 
@@ -320,6 +320,7 @@ class QCQP:
         self.prob = prob
         self.qcqp_form = get_qcqp_form(prob)
         self.n = self.qcqp_form.n
+        self.spectral_sol = None
         self.spectral_bound = None
         self.sdr_sol = None
         self.sdr_bound = None
@@ -331,9 +332,11 @@ class QCQP:
         if method == s.RANDOM:
             x = np.random.randn(self.n)
         elif method == s.SPECTRAL:
-            x, self.spectral_bound = solve_spectral(self.qcqp_form, *args, **kwargs)
-            if self.maximize_flag:
-                self.spectral_bound *= -1
+            if self.spectral_sol is None:
+                self.spectral_sol, self.spectral_bound = solve_spectral(self.qcqp_form, *args, **kwargs)
+                if self.maximize_flag:
+                    self.spectral_bound *= -1
+            x = self.spectral_sol
         elif method == s.SDR:
             if self.sdr_sol is None:
                 self.sdr_sol, self.sdr_bound = solve_sdr(self.qcqp_form, *args, **kwargs)
@@ -348,13 +351,7 @@ class QCQP:
         if self.maximize_flag: f0 *= -1
         return (f0, max(self.qcqp_form.violations(x)))
 
-    def improve(self, method, *args, **kwargs):
-        if method not in s.improve_methods:
-            raise Exception("Unknown improve method: %s\n", method)
-        for x in self.prob.variables():
-            if x.value is None:
-                self.suggest()
-                break
+    def _improve(self, method, *args, **kwargs):
         x0 = flatten_vars(self.prob.variables(), self.n)
         if method == s.COORD_DESCENT:
             x = improve_coord_descent(x0, self.qcqp_form, args, kwargs)
@@ -367,3 +364,18 @@ class QCQP:
         f0 = self.qcqp_form.f0.eval(x)
         if self.maximize_flag: f0 *= -1
         return (f0, max(self.qcqp_form.violations(x)))
+
+
+    def improve(self, method, *args, **kwargs):
+        if not isinstance(method, list): methods = [method]
+        else: methods = method
+
+        if not all([method in s.improve_methods for method in methods]):
+            raise Exception("Unknown improve method(s): ", methods)
+
+        if any([x is None for x in self.prob.variables()]):
+            self.suggest()
+
+        for method in methods:
+            f, v = self._improve(method, args, kwargs)
+        return (f, v)
