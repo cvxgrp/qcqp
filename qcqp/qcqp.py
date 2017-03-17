@@ -218,11 +218,15 @@ def admm_phase2(x0, prob, rho, tol=1e-2, num_iters=1000, viol_lim=1e4):
     xs = [np.copy(x0) for i in range(prob.m)]
     us = [np.zeros(prob.n) for i in range(prob.m)]
 
-    zlhs = 2*(prob.f0.P + rho*prob.m*sp.identity(prob.n))
+    if prob.rho != rho:
+        prob.rho = rho
+        zlhs = 2*(prob.f0.P + rho*prob.m*sp.identity(prob.n))
+        prob.z_solver = SLA.factorized(zlhs)
+
     last_z = None
     for t in range(num_iters):
         rhs = 2*rho*(sum(xs)-sum(us)) - prob.f0.qarray
-        z = SLA.spsolve(zlhs.tocsr(), rhs)
+        z = prob.z_solver(rhs)
 
         # TODO: parallel x/u-updates
         for i in range(prob.m):

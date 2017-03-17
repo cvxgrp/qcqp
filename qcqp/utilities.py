@@ -43,6 +43,7 @@ class QuadraticFunction:
         self.P, self.q, self.r = P, q, r
         self.qarray = np.squeeze(np.asarray(q.todense()))
         self.relop = relop
+        self.eigh = None # for ADMM
 
     # Evalutes f with a numpy array x.
     def eval(self, x):
@@ -125,6 +126,8 @@ class QCQPForm:
         self.fs = fs
         self.n = f0.P.shape[0]
         self.m = len(fs)
+        self.rho = None # for ADMM
+        self.z_solver = None # for ADMM
     def fi(self, i):
         return self.fs[i]
     def violations(self, x): # list of constraint violations
@@ -154,8 +157,11 @@ def onecons_qcqp(z, f, tol=1e-6):
     if f.relop == '<=' and f.eval(z) <= 0:
         return z
 
-    Psymm = (f.P + f.P.T)/2.
-    lmb, Q = LA.eigh(np.asarray(Psymm.todense()))
+    if f.eigh is None:
+        Psymm = (f.P + f.P.T)/2.
+        f.eigh = LA.eigh(np.asarray(Psymm.todense()))
+
+    lmb, Q = f.eigh
     zhat = Q.T.dot(z)
     qhat = Q.T.dot(f.qarray)
 
