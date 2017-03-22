@@ -8,8 +8,7 @@ Our heuristics are based on the *Suggest-and-Improve* framework:
 * *Improve* method takes a point from the *Suggest* method and performs a local search to find a better point.
 
 The notion of better points is defined by the maximum violation of a point and the objective value.
-See our associated paper (to be posted online) for more information on the *Suggest-and-Improve* framework.
-For the older version of the paper discussing the semidefinite relaxation (SDR) and randomized algorithms, see [here](http://stanford.edu/class/ee364b/lectures/relaxations.pdf).
+See our [associated paper](https://stanford.edu/~boyd/papers/qcqp.html) for more information on the *Suggest-and-Improve* framework.
 
 QCQP is built on top of [CVXPY](http://www.cvxpy.org/), a domain-specific language for convex optimization embedded in Python.
 
