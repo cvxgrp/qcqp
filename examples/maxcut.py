@@ -22,7 +22,7 @@ prob = cvx.Problem(cvx.Maximize(obj), cons)
 qcqp = QCQP(prob)
 
 # sample from the semidefinite relaxation
-qcqp.suggest(SDR, solver=cvx.MOSEK)
+qcqp.suggest(SDR)
 print("SDR-based upper bound: %.3f" % qcqp.sdr_bound)
 
 f_cd, v_cd = qcqp.improve(COORD_DESCENT)

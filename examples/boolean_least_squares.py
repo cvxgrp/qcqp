@@ -16,7 +16,7 @@ prob = cvx.Problem(cvx.Minimize(obj), cons)
 qcqp = QCQP(prob)
 
 # sample from the semidefinite relaxation
-qcqp.suggest(SDR, solver=cvx.MOSEK)
+qcqp.suggest(SDR)
 print("SDR lower bound: %.3f" % qcqp.sdr_bound)
 
 f_cd, v_cd = qcqp.improve(COORD_DESCENT)
@@ -29,7 +29,7 @@ f_dccp, v_dccp = qcqp.improve(DCCP)
 print("Penalty CCP: objective %.3f, violation %.3f" % (f_dccp, v_dccp))
 f_dccp, v_dccp = qcqp.improve(COORD_DESCENT, phase1=False)
 x_dccp = x.value
-print("Penalty CCP: objective %.3f, violation %.3f" % (f_dccp, v_dccp))
+print("Penalty CCP + coordinate descent: objective %.3f, violation %.3f" % (f_dccp, v_dccp))
 
 qcqp.suggest(SDR)
 f_admm, v_admm = qcqp.improve(COORD_DESCENT)
