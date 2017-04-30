@@ -43,8 +43,8 @@ prob = cvx.Problem(cvx.Minimize(obj), cons)
 qcqp = QCQP(prob)
 
 # Solve the SDP relaxation and get a starting point to a local method
-qcqp.suggest(SDR, solver=cvx.MOSEK)
-print("SDP-based lower bound: %.3f" % qcqp.sdp_bound)
+qcqp.suggest(SDR)
+print("SDR lower bound: %.3f" % qcqp.sdr_bound)
 
 # Attempt to improve the starting point given by the suggest method
 f_cd, v_cd = qcqp.improve(COORD_DESCENT)
