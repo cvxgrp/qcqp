@@ -78,7 +78,7 @@ Currently two *Suggest* methods are available for QCQPs:
 
 * ``qcqp.suggest()`` or ``qcqp.suggest(RANDOM)`` fills the values of the variables using independent and identically distributed Gaussian random variables.
 * ``qcqp.suggest(SPECTRAL)`` adds all the constraints to a single (possibly nonconvex) constraint, and solves the resulting QCQP with that one constraint. The solution of the relaxation is then stored to the values of the variables. Then, a lower bound (or an upper bound, in the case of a maximization problem) on the optimal value is saved to ``qcqp.spectral_bound``. *The performance of this method is yet to be optimized.*
-* ``qcqp.suggest(SDR)`` fills the values of the variables drawn from an optimal probability distribution given by the semidefinite relaxation. Then, a lower bound (or an upper bound, in the case of a maximization problem) on the optimal value is saved to ``qcqp.sdr_bound``.
+* ``qcqp.suggest(SDR)`` fills the values of the variables drawn from an optimal probability distribution given by the semidefinite relaxation. Then, a lower bound (or an upper bound, in the case of a maximization problem) on the optimal value is saved to ``qcqp.sdr_bound``. Note: For larger problem instances, ``QCQP`` may fail while solving the semidefinite relaxation. In this case, specifying the MOSEK solver may help: ``qcqp.suggest(SDR, solver=cvx.MOSEK)``. For more information on how to choose solvers, please see the [CVXPY guide](http://www.cvxpy.org/en/latest/tutorial/advanced/index.html#choosing-a-solver).
 
 Below is a list of available solve methods for QCQPs:
 
