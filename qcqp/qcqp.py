@@ -319,6 +319,48 @@ def improve_dccp(x0, prob, *args, **kwargs):
     return bestx
 
 
+def improve_ipopt(x0, prob, *args, **kwargs):
+    try:
+        import pyipopt
+    except ImportError:
+        raise Exception("PyIpopt package is not installed.")
+
+    lb = pyipopt.NLP_LOWER_BOUND_INF
+    ub = pyipopt.NLP_UPPER_BOUND_INF
+    g_L = np.zeros(prob.m)
+    for i in range(prob.m):
+        if prob.fs[i].relop == '<=':
+            g_L[i] = lb
+    g_U = np.zeros(prob.m)
+
+    def eval_grad_f(x, user_data = None):
+        return 2*prob.f0.P.dot(x) + prob.f0.qarray
+    def eval_g(x, user_data = None):
+        return np.array([f.eval(x) for f in prob.fs])
+
+    jac_grid = np.indices((prob.m, prob.n))
+    jac_r = jac_grid[0].ravel()
+    jac_c = jac_grid[1].ravel()
+    def eval_jac_g(x, flag, user_data = None):
+        if flag:
+            return (jac_r, jac_c)
+        else:
+            return np.vstack([2*f.P.dot(x)+f.qarray for f in prob.fs])
+
+    nlp = pyipopt.create(
+        prob.n, lb*np.ones(prob.n), ub*np.ones(prob.n),
+        prob.m, g_L, g_U, prob.m*prob.n, 0,
+        prob.f0.eval, eval_grad_f,
+        eval_g, eval_jac_g
+    )
+    try:
+        x, zl, zu, constraint_multipliers, obj, status = nlp.solve(x0)
+    except:
+        pass
+
+    return x
+
+
 class QCQP:
     def __init__(self, prob):
         self.prob = prob
@@ -363,6 +405,8 @@ class QCQP:
             x = improve_admm(x0, self.qcqp_form, args, kwargs)
         elif method == s.DCCP:
             x = improve_dccp(x0, self.qcqp_form, args, kwargs)
+        elif method == s.IPOPT:
+            x = improve_ipopt(x0, self.qcqp_form, args, kwargs)
 
         assign_vars(self.prob.variables(), x)
         f0 = self.qcqp_form.f0.eval(x)

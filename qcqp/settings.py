@@ -31,6 +31,7 @@ suggest_methods = [RANDOM, SDR, SPECTRAL]
 COORD_DESCENT = "coord-descent"
 ADMM = "admm"
 DCCP = "dccp"
+IPOPT = "ipopt"
 
-improve_methods = [COORD_DESCENT, ADMM, DCCP]
+improve_methods = [COORD_DESCENT, ADMM, DCCP, IPOPT]
 

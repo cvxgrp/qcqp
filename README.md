@@ -83,8 +83,9 @@ Currently two *Suggest* methods are available for QCQPs:
 Below is a list of available solve methods for QCQPs:
 
 * ``qcqp.improve(ADMM)`` attempts to improve the given point via consensus [alternating directions method of multipliers](http://stanford.edu/~boyd/admm.html) (ADMM). An optional parameter ``rho`` can be specified.
-* ``qcqp.improve(DCCP)`` automatically splits indefinite quadratic functions to convex and concave parts, then invokes the [DCCP](https://github.com/cvxgrp/dccp) package, using the given point as a starting point. An optional parameter ``tau`` can be specified.
+* ``qcqp.improve(DCCP)`` automatically splits indefinite quadratic functions to convex and concave parts, then invokes the [DCCP](https://github.com/cvxgrp/dccp) package, using the given point as a starting point. An optional parameter ``tau`` can be specified. In order to use this method, ``DCCP`` must be installed first.
 * ``qcqp.improve(COORD_DESCENT)`` performs a two-stage coordinate descent algorithm. The first stage tries to find a feasible point. If a feasible point is found, then the second stage tries to optimize the objective function over the set of feasible points.
+* ``qcqp.improve(IPOPT)`` invokes the global optimizer [IPOPT](https://projects.coin-or.org/Ipopt) package, via [PyIpopt](https://github.com/xuy/pyipopt) as the interface. In order to use this method, both ``IPOPT`` and ``PyIpopt`` must be installed first.
 
 Both ``improve()`` and ``suggest()`` methods return a pair ``(f, v)``, where ``f`` represents the current objective value, and ``v`` represents the maximum constraint violation of the current point.
 
