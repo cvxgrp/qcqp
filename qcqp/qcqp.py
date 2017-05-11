@@ -190,7 +190,7 @@ def improve_coord_descent(x, prob, *args, **kwargs):
 
 
 def admm_phase1(x0, prob, tol=1e-2, num_iters=1000):
-    logging.info("Starting ADMM phase 1")
+    logging.info("Starting ADMM phase 1 with tol %.3f", tol)
 
     z = np.copy(x0)
     xs = [np.copy(x0) for i in range(prob.m)]
@@ -220,7 +220,7 @@ def admm_phase2(x0, prob, rho, tol=1e-2, num_iters=1000, viol_lim=1e4):
 
     if prob.rho != rho:
         prob.rho = rho
-        zlhs = 2*(prob.f0.P + rho*prob.m*sp.identity(prob.n))
+        zlhs = 2*(prob.f0.P + rho*prob.m*sp.identity(prob.n)).tocsc()
         prob.z_solver = SLA.factorized(zlhs)
 
     last_z = None
@@ -400,13 +400,13 @@ class QCQP:
     def _improve(self, method, *args, **kwargs):
         x0 = flatten_vars(self.prob.variables(), self.n)
         if method == s.COORD_DESCENT:
-            x = improve_coord_descent(x0, self.qcqp_form, args, kwargs)
+            x = improve_coord_descent(x0, self.qcqp_form, *args, **kwargs)
         elif method == s.ADMM:
-            x = improve_admm(x0, self.qcqp_form, args, kwargs)
+            x = improve_admm(x0, self.qcqp_form, *args, **kwargs)
         elif method == s.DCCP:
-            x = improve_dccp(x0, self.qcqp_form, args, kwargs)
+            x = improve_dccp(x0, self.qcqp_form, *args, **kwargs)
         elif method == s.IPOPT:
-            x = improve_ipopt(x0, self.qcqp_form, args, kwargs)
+            x = improve_ipopt(x0, self.qcqp_form, *args, **kwargs)
 
         assign_vars(self.prob.variables(), x)
         f0 = self.qcqp_form.f0.eval(x)
@@ -425,5 +425,5 @@ class QCQP:
             self.suggest()
 
         for method in methods:
-            f, v = self._improve(method, args, kwargs)
+            f, v = self._improve(method, *args, **kwargs)
         return (f, v)
