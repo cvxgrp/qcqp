@@ -22,6 +22,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 
-from qcqp import QCQP
-from settings import RANDOM, SPECTRAL, SDR
-from settings import COORD_DESCENT, ADMM, DCCP, IPOPT
+from qcqp.qcqp import QCQP
+from qcqp.settings import RANDOM, SPECTRAL, SDR
+from qcqp.settings import COORD_DESCENT, ADMM, DCCP, IPOPT
