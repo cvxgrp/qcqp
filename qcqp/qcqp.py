@@ -23,15 +23,18 @@ SOFTWARE.
 """
 
 from __future__ import division
+from __future__ import absolute_import
+
 import cvxpy as cvx
 import numpy as np
 import cvxpy.lin_ops.lin_utils as lu
 import scipy.sparse as sp
 from numpy import linalg as LA
 import scipy.sparse.linalg as SLA
-from utilities import *
 import logging
-import settings as s
+
+from qcqp.utilities import *
+import qcqp.settings as s
 
 logging.basicConfig(filename='qcqp.log', filemode='w', level=logging.INFO)
 
