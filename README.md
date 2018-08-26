@@ -14,7 +14,10 @@ QCQP is built on top of [CVXPY](http://www.cvxpy.org/), a domain-specific langua
 
 Installation
 ------------
-You should first install CVXPY, following the instructions [here](http://www.cvxpy.org/). If you already have CVXPY, make sure you have the latest version by running ``pip install --upgrade cvxpy``.
+*NOTE: QCQP was developed before the release of CVXPY 1.0, which is [not backward compatible](http://www.cvxpy.org/) with the previous version CVXPY 0.4. As of August 2018, QCQP is only compatible with CVXPY 0.4.*
+
+You should first install CVXPY 0.4, following the instructions [here](http://www.cvxpy.org/).
+If you already have CVXPY, make sure you have the version compatible with QCQP by running ``conda list cvxpy`` or ``pip show cvxpy``. latest version by running ``pip install --upgrade cvxpy``.
 
 The simplest and recommended way of installing QCQP is to run ``pip install qcqp``.
 To install the package from source, run ``python setup.py install`` in the source directory.
