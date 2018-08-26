@@ -17,7 +17,10 @@ Installation
 *NOTE: QCQP was developed before the release of CVXPY 1.0, which is [not backward compatible](http://www.cvxpy.org/) with the previous version CVXPY 0.4. As of August 2018, QCQP is only compatible with CVXPY 0.4.*
 
 You should first install CVXPY 0.4, following the instructions [here](http://www.cvxpy.org/).
-If you already have CVXPY, make sure you have the version compatible with QCQP by running ``conda list cvxpy`` or ``pip show cvxpy``. latest version by running ``pip install --upgrade cvxpy``.
+If you already have CVXPY, make sure you have the version compatible with QCQP by running ``conda list cvxpy`` or ``pip show cvxpy``. You can install the compatible version of CVXPY by running the following.
+```
+conda install -c cvxgrp cvxpy=0.4.9
+```
 
 The simplest and recommended way of installing QCQP is to run ``pip install qcqp``.
 To install the package from source, run ``python setup.py install`` in the source directory.
